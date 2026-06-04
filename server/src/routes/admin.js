@@ -625,6 +625,13 @@ router.put('/configs', auth, admin, async (req, res) => {
         await Config.create({ key, value: strValue })
       }
     }
+    // 如果修改了 SMTP 配置，重新初始化邮件服务
+    const smtpKeys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure', 'smtp_from']
+    const hasSmtpChange = Object.keys(configs).some(k => smtpKeys.includes(k))
+    if (hasSmtpChange) {
+      const { initTransporter } = require('../services/email')
+      await initTransporter()
+    }
     res.json({ code: 200, message: '保存成功' })
   } catch (error) {
     console.error(error)
