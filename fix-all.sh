@@ -49,7 +49,7 @@ echo "[5/8] 配置 Nginx 反向代理到 80 端口..."
 cat > /etc/nginx/sites-available/cloudhost << 'EOF'
 server {
     listen 80;
-    server_name pveusa.ypvps.com www.pveusa.ypvps.com;
+    server_name pveusa.ypvps.com;
     
     # 日志
     access_log /var/log/nginx/cloudhost_access.log;
@@ -98,13 +98,12 @@ else
     echo "✗ 网站访问异常"
 fi
 
-# 7. 申请 HTTPS 证书
+# 7. 申请 HTTPS 证书（不带 www）
 echo "[7/8] 申请 HTTPS 证书..."
 systemctl stop nginx
 
 certbot certonly --standalone \
     -d pveusa.ypvps.com \
-    -d www.pveusa.ypvps.com \
     --agree-tos \
     --email admin@pveusa.ypvps.com \
     --non-interactive || {
@@ -118,14 +117,14 @@ if [ -d "/etc/letsencrypt/live/pveusa.ypvps.com" ]; then
 # HTTP 重定向到 HTTPS
 server {
     listen 80;
-    server_name pveusa.ypvps.com www.pveusa.ypvps.com;
+    server_name pveusa.ypvps.com;
     return 301 https://$host$request_uri;
 }
 
 # HTTPS 配置
 server {
     listen 443 ssl http2;
-    server_name pveusa.ypvps.com www.pveusa.ypvps.com;
+    server_name pveusa.ypvps.com;
     
     ssl_certificate /etc/letsencrypt/live/pveusa.ypvps.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/pveusa.ypvps.com/privkey.pem;
