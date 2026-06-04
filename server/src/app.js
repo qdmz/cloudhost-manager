@@ -12,8 +12,19 @@ const PORT = process.env.APP_PORT || 8080
 
 app.use(helmet({
   contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false
 }))
+
+// 手动设置允许跨域的响应头
+app.use((req, res, next) => {
+  res.set({
+    'Cross-Origin-Opener-Policy': 'unsafe-none',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+    'Cross-Origin-Allow-Mixed': 'anonymous'
+  })
+  next()
+})
 app.use(cors())
 app.use(morgan('dev'))
 app.use(express.json())
