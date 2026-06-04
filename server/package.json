@@ -22,7 +22,6 @@
     "mysql2": "^3.6.2",
     "nodemailer": "^6.9.7",
     "sequelize": "^6.33.0",
-    "sqlite3": "^6.0.1",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

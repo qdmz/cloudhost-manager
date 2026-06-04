@@ -1,9 +1,13 @@
 const { Sequelize } = require('sequelize')
-const path = require('path')
+require('dotenv').config()
 
 const sequelize = new Sequelize({
-  dialect: 'sqlite',
-  storage: path.join(__dirname, '../../data/database.sqlite'),
+  dialect: 'mysql',
+  host: process.env.DB_HOST || 'localhost',
+  port: process.env.DB_PORT || 3306,
+  database: process.env.DB_NAME || 'cloudhost',
+  username: process.env.DB_USER || 'root',
+  password: process.env.DB_PASS || '',
   logging: false,
   pool: { max: 10, min: 0, acquire: 30000, idle: 10000 },
   define: { timestamps: true, underscored: true }
