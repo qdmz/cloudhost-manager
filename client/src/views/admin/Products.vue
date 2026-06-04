@@ -75,18 +75,78 @@
     </a-modal>
     
     <a-modal v-model:open="plansModalVisible" title="管理配置方案" width="800px">
+      <div style="margin-bottom: 16px;">
+        <a-button type="primary" @click="openAddPlanModal">
+          <PlusOutlined /> 添加配置方案
+        </a-button>
+      </div>
       <a-table :columns="planColumns" :data-source="plans" size="small" row-key="id">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'price'">
             <span class="text-primary">¥{{ record.price_monthly || 0 }}</span>
           </template>
           <template v-else-if="column.key === 'action'">
-            <a-popconfirm title="确定删除？" @confirm="handleDeletePlan(record.id)">
-              <a-button size="small" danger>删除</a-button>
-            </a-popconfirm>
+            <a-space>
+              <a-button size="small" @click="openEditPlanModal(record)">编辑</a-button>
+              <a-popconfirm title="确定删除？" @confirm="handleDeletePlan(record.id)">
+                <a-button size="small" danger>删除</a-button>
+              </a-popconfirm>
+            </a-space>
           </template>
         </template>
       </a-table>
+    </a-modal>
+    
+    <a-modal v-model:open="addPlanModalVisible" title="添加配置方案" width="600px" @ok="handleSavePlan">
+      <a-form :model="planForm" layout="vertical">
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="配置名称" name="name">
+              <a-input v-model:value="planForm.name" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="月价格" name="price_monthly">
+              <a-input-number v-model:value="planForm.price_monthly" :min="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="CPU" name="cpu">
+              <a-input-number v-model:value="planForm.cpu" :min="1" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="内存(MB)" name="memory">
+              <a-input-number v-model:value="planForm.memory" :min="128" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="磁盘(GB)" name="disk">
+              <a-input-number v-model:value="planForm.disk" :min="5" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="季度价格" name="price_quarterly">
+              <a-input-number v-model:value="planForm.price_quarterly" :min="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="年价格" name="price_yearly">
+              <a-input-number v-model:value="planForm.price_yearly" :min="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="网络带宽" name="bandwidth">
+          <a-input-number v-model:value="planForm.bandwidth" :min="1" :addonBefore="'Mbps'" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="流量限制(GB)" name="traffic">
+          <a-input-number v-model:value="planForm.traffic" :min="0" style="width: 100%" />
+        </a-form-item>
+      </a-form-item>
     </a-modal>
   </div>
 </template>
@@ -95,14 +155,17 @@
 import { ref, onMounted, reactive } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
+import { getProducts, createProduct, updateProduct, deleteProduct, getPlans, createPlan, updatePlan, deletePlan } from '@/api/admin'
 
 const loading = ref(false)
 const products = ref([])
 const addModalVisible = ref(false)
 const plansModalVisible = ref(false)
+const addPlanModalVisible = ref(false)
 const currentProduct = ref(null)
 const plans = ref([])
 const editingProductId = ref(null)
+const editingPlanId = ref(null)
 
 const productForm = reactive({
   name: '',
@@ -111,7 +174,20 @@ const productForm = reactive({
   features: '',
   cpu_range: '1-8',
   memory_range: '512-16384',
-  disk_range: '10-500'
+  disk_range: '10-500',
+  status: 'online'
+})
+
+const planForm = reactive({
+  name: '',
+  cpu: 1,
+  memory: 1024,
+  disk: 20,
+  bandwidth: 100,
+  traffic: 0,
+  price_monthly: 10,
+  price_quarterly: 27,
+  price_yearly: 100
 })
 
 const columns = [
@@ -128,18 +204,16 @@ const planColumns = [
   { title: 'CPU', dataIndex: 'cpu' },
   { title: '内存(MB)', dataIndex: 'memory' },
   { title: '磁盘(GB)', dataIndex: 'disk' },
+  { title: '带宽(Mbps)', dataIndex: 'bandwidth' },
   { title: '月价', key: 'price' },
-  { title: '操作', key: 'action', width: 100 }
+  { title: '操作', key: 'action', width: 150 }
 ]
 
 const fetchProducts = async () => {
   loading.value = true
   try {
-    const res = await fetch('/api/admin/products', {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
-    const data = await res.json()
-    products.value = data.data?.list || []
+    const res = await getProducts()
+    products.value = res.data?.list || []
   } catch (error) {
     console.error(error)
   } finally {
@@ -156,7 +230,8 @@ const openAddModal = () => {
     features: '',
     cpu_range: '1-8',
     memory_range: '512-16384',
-    disk_range: '10-500'
+    disk_range: '10-500',
+    status: 'online'
   })
   addModalVisible.value = true
 }
@@ -171,32 +246,42 @@ const openPlansModal = async (product) => {
   currentProduct.value = product
   plansModalVisible.value = true
   try {
-    const res = await fetch(`/api/admin/products/${product.id}/plans`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
-    const data = await res.json()
-    plans.value = data.data || []
+    const res = await getPlans(product.id)
+    plans.value = res.data || []
   } catch (error) {
     console.error(error)
   }
 }
 
+const openAddPlanModal = () => {
+  editingPlanId.value = null
+  Object.assign(planForm, {
+    name: '',
+    cpu: 1,
+    memory: 1024,
+    disk: 20,
+    bandwidth: 100,
+    traffic: 0,
+    price_monthly: 10,
+    price_quarterly: 27,
+    price_yearly: 100
+  })
+  addPlanModalVisible.value = true
+}
+
+const openEditPlanModal = (plan) => {
+  editingPlanId.value = plan.id
+  Object.assign(planForm, plan)
+  addPlanModalVisible.value = true
+}
+
 const handleSaveProduct = async () => {
   try {
-    const url = editingProductId.value 
-      ? `/api/admin/products/${editingProductId.value}` 
-      : '/api/admin/products'
-    const method = editingProductId.value ? 'PUT' : 'POST'
-    
-    await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify(productForm)
-    })
-    
+    if (editingProductId.value) {
+      await updateProduct(editingProductId.value, productForm)
+    } else {
+      await createProduct(productForm)
+    }
     message.success('保存成功')
     addModalVisible.value = false
     fetchProducts()
@@ -205,12 +290,26 @@ const handleSaveProduct = async () => {
   }
 }
 
+const handleSavePlan = async () => {
+  try {
+    if (!currentProduct.value) return
+    
+    if (editingPlanId.value) {
+      await updatePlan(editingPlanId.value, planForm)
+    } else {
+      await createPlan(currentProduct.value.id, planForm)
+    }
+    message.success('保存成功')
+    addPlanModalVisible.value = false
+    openPlansModal(currentProduct.value)
+  } catch (error) {
+    message.error(error.message)
+  }
+}
+
 const handleDelete = async (id) => {
   try {
-    await fetch(`/api/admin/products/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
+    await deleteProduct(id)
     message.success('删除成功')
     fetchProducts()
   } catch (error) {
@@ -220,10 +319,7 @@ const handleDelete = async (id) => {
 
 const handleDeletePlan = async (id) => {
   try {
-    await fetch(`/api/admin/plans/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
+    await deletePlan(id)
     message.success('删除成功')
     if (currentProduct.value) openPlansModal(currentProduct.value)
   } catch (error) {

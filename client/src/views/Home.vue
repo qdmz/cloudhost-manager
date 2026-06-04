@@ -76,7 +76,7 @@
                 <span class="price">¥{{ product.min_price }}</span>
                 <span class="unit">/月起</span>
               </div>
-              <a-button type="primary" block @click="$router.push(`/products/${product.id}`)">
+              <a-button type="primary" block @click="$router.push('/products')">
                 立即购买
               </a-button>
             </div>

@@ -108,10 +108,33 @@ const fetchConfigs = async () => {
   try {
     const res = await getConfigs()
     const configs = res.data || {}
-    Object.assign(basicForm.value, configs.basic || {})
-    Object.assign(smtpForm.value, configs.smtp || {})
-    Object.assign(epayForm.value, configs.epay || {})
-    Object.assign(authForm.value, configs.auth || {})
+    // 扁平化读取配置
+    Object.assign(basicForm.value, {
+      site_name: configs.site_name || 'CloudHost',
+      site_title: configs.site_title || '云主机管理平台',
+      site_description: configs.site_description || '',
+      site_keywords: configs.site_keywords || '',
+      site_logo: configs.site_logo || '',
+      site_url: configs.site_url || ''
+    })
+    Object.assign(smtpForm.value, {
+      smtp_host: configs.smtp_host || '',
+      smtp_port: configs.smtp_port || 465,
+      smtp_user: configs.smtp_user || '',
+      smtp_pass: configs.smtp_pass || '',
+      smtp_from: configs.smtp_from || '',
+      smtp_secure: configs.smtp_secure || true
+    })
+    Object.assign(epayForm.value, {
+      epay_url: configs.epay_url || '',
+      epay_pid: configs.epay_pid || '',
+      epay_key: configs.epay_key || ''
+    })
+    Object.assign(authForm.value, {
+      auth_enabled: configs.auth_enabled || false,
+      auth_api: configs.auth_api || '',
+      auth_key: configs.auth_key || ''
+    })
   } catch (error) {
     console.error(error)
   }
@@ -119,7 +142,16 @@ const fetchConfigs = async () => {
 
 const saveConfig = async (type) => {
   try {
-    const data = { [type]: type === 'basic' ? basicForm.value : type === 'smtp' ? smtpForm.value : type === 'epay' ? epayForm.value : authForm.value }
+    let data = {}
+    if (type === 'basic') {
+      data = basicForm.value
+    } else if (type === 'smtp') {
+      data = smtpForm.value
+    } else if (type === 'epay') {
+      data = epayForm.value
+    } else if (type === 'auth') {
+      data = authForm.value
+    }
     await updateConfigs(data)
     message.success('保存成功')
   } catch (error) {

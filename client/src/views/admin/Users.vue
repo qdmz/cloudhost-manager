@@ -183,9 +183,13 @@ const handleAdjustBalance = async () => {
 
 const impersonate = async (user) => {
   try {
-    await impersonateUser(user.id)
-    message.success('代登成功')
-    window.open('/', '_blank')
+    const res = await impersonateUser(user.id)
+    if (res.data?.token) {
+      // 保存token到localStorage并刷新
+      localStorage.setItem('token', res.data.token)
+      message.success('代登成功，正在跳转...')
+      window.location.href = '/home'
+    }
   } catch (error) {
     message.error(error.message)
   }

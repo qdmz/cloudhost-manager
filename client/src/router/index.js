@@ -115,17 +115,23 @@ const routes = [
         meta: { title: '用户管理', requiresAdmin: true }
       },
       {
-        path: 'orders',
-        name: 'AdminOrders',
-        component: () => import('@/views/admin/Orders.vue'),
-        meta: { title: '订单管理', requiresAdmin: true }
-      },
-      {
-        path: 'tickets',
-        name: 'AdminTickets',
-        component: () => import('@/views/admin/Tickets.vue'),
-        meta: { title: '工单管理', requiresAdmin: true }
-      },
+          path: 'orders',
+          name: 'AdminOrders',
+          component: () => import('@/views/admin/Orders.vue'),
+          meta: { title: '订单管理', requiresAdmin: true }
+        },
+        {
+          path: 'services',
+          name: 'AdminServices',
+          component: () => import('@/views/admin/Services.vue'),
+          meta: { title: '服务管理', requiresAdmin: true }
+        },
+        {
+          path: 'tickets',
+          name: 'AdminTickets',
+          component: () => import('@/views/admin/Tickets.vue'),
+          meta: { title: '工单管理', requiresAdmin: true }
+        },
       {
         path: 'products',
         name: 'AdminProducts',
