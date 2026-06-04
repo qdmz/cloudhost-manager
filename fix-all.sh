@@ -44,7 +44,7 @@ else
     exit 1
 fi
 
-# 5. 配置 Nginx
+# 5. 配置 Nginx（仅主域名，不包含www）
 echo "[5/8] 配置 Nginx 反向代理到 80 端口..."
 cat > /etc/nginx/sites-available/cloudhost << 'EOF'
 server {
@@ -98,21 +98,24 @@ else
     echo "✗ 网站访问异常"
 fi
 
-# 7. 申请 HTTPS 证书（不带 www）
-echo "[7/8] 申请 HTTPS 证书..."
+# 7. 申请 HTTPS 证书（仅主域名，不包含www）
+echo "[7/8] 申请 HTTPS 证书（仅 pveusa.ypvps.com）..."
 systemctl stop nginx
 
+# 单独申请主域名证书，不包含www
 certbot certonly --standalone \
     -d pveusa.ypvps.com \
     --agree-tos \
     --email admin@pveusa.ypvps.com \
     --non-interactive || {
-    echo "✗ 证书申请失败（可能 DNS 未配置）"
+    echo "✗ 证书申请失败（可能 DNS 未配置到 pveusa.ypvps.com）"
     systemctl start nginx
 }
 
 # 如果证书申请成功，配置 HTTPS
 if [ -d "/etc/letsencrypt/live/pveusa.ypvps.com" ]; then
+    echo "✓ 证书申请成功，配置 HTTPS..."
+    
     cat > /etc/nginx/sites-available/cloudhost << 'EOF'
 # HTTP 重定向到 HTTPS
 server {
@@ -165,11 +168,12 @@ EOF
     nginx -t
     systemctl restart nginx
     
-    # 设置自动续期
+    # 设置自动续期（每90天）
     (crontab -l 2>/dev/null; echo "0 0 * * * certbot renew --quiet --renew-hook 'systemctl reload nginx'") | crontab -
     
     echo "✓ HTTPS 证书配置完成"
 else
+    echo "⚠ 证书未申请成功，请检查 DNS 解析是否正确配置"
     systemctl start nginx
 fi
 
@@ -199,7 +203,7 @@ echo "  ✓ 首页购买按钮"
 echo "  ✓ 易支付对接"
 echo "  ✓ 代登录功能"
 echo "  ✓ Nginx 80端口"
-echo "  ✓ HTTPS 证书"
+echo "  ✓ HTTPS 证书（仅 pveusa.ypvps.com）"
 echo ""
 echo "如果还有问题，请查看日志："
 echo "  tail -f /tmp/cloudhost.log"
