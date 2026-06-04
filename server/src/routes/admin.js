@@ -625,7 +625,11 @@ router.put('/configs', auth, admin, async (req, res) => {
         await Config.create({ key, value: strValue })
       }
     }
-    // 如果修改了 SMTP 配置，重新初始化邮件服务
+    // 清除配置缓存
+    const { clearCache } = require('../services/config')
+    clearCache()
+    
+    // 如果修改了SMTP配置，重新初始化邮件服务
     const smtpKeys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure', 'smtp_from']
     const hasSmtpChange = Object.keys(configs).some(k => smtpKeys.includes(k))
     if (hasSmtpChange) {
