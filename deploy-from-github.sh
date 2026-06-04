@@ -60,12 +60,14 @@ echo "  ✅ 代码拉取完成"
 
 # 5. 配置数据库
 echo "[5/9] 配置数据库..."
-mysql -u root << 'MYSQL_EOF'
+# 先尝试无密码连接创建数据库
+mysql -u root << 'MYSQL_EOF' 2>/dev/null || mysql -u root -p"$DB_PASS" << 'MYSQL_EOF' 2>/dev/null || true
 CREATE DATABASE IF NOT EXISTS cloudhost DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 FLUSH PRIVILEGES;
 MYSQL_EOF
 
-mysql -u root << MYSQL_EOF
+# 设置root密码（兼容已有密码或无密码的情况）
+mysql -u root -p"$DB_PASS" << MYSQL_EOF 2>/dev/null || mysql -u root << MYSQL_EOF 2>/dev/null || true
 ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_PASS';
 FLUSH PRIVILEGES;
 MYSQL_EOF
