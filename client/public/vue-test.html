@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudHost - Vue诊断</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 40px; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; }
+    h1 { color: #1890ff; }
+    .status { padding: 15px; margin: 10px 0; border-radius: 4px; }
+    .success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+    .error { background: #fff2f0; border: 1px solid #ffccc7; color: #ff4d4f; }
+    .info { background: #e6f7ff; border: 1px solid #91d5ff; color: #1890ff; }
+    #app { margin-top: 20px; padding: 20px; background: #fafafa; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>☁️ CloudHost Vue诊断</h1>
+    
+    <div id="vue-status"></div>
+    
+    <div id="app">
+      <h2>{{ message }}</h2>
+      <p>如果看到这个消息，说明Vue 3已经成功挂载！</p>
+      <button @click="testMethod">点击测试</button>
+      <p>{{ clickResult }}</p>
+    </div>
+    
+    <div id="module-test"></div>
+  </div>
+  
+  <script>
+    // 诊断信息
+    const status = [];
+    
+    // 检查Vue
+    try {
+      if (typeof Vue !== 'undefined') {
+        status.push('<div class="success">✅ Vue 3 已加载，版本: ' + Vue.version + '</div>');
+      } else {
+        status.push('<div class="error">❌ Vue 3 未加载</div>');
+      }
+    } catch (e) {
+      status.push('<div class="error">❌ Vue检查错误: ' + e.message + '</div>');
+    }
+    
+    document.getElementById('vue-status').innerHTML = status.join('');
+    
+    // 尝试挂载Vue应用
+    try {
+      const { createApp, ref } = Vue;
+      
+      const app = createApp({
+        setup() {
+          const message = ref('Vue 3 应用已挂载成功！');
+          const clickResult = ref('');
+          
+          const testMethod = () => {
+            clickResult.value = '按钮点击成功！';
+          };
+          
+          return { message, clickResult, testMethod };
+        }
+      });
+      
+      app.mount('#app');
+      document.getElementById('module-test').innerHTML = '<div class="success">✅ Vue应用挂载成功</div>';
+      console.log('Vue应用挂载成功');
+    } catch (e) {
+      document.getElementById('module-test').innerHTML = '<div class="error">❌ Vue应用挂载失败: ' + e.message + '</div>';
+      console.error('Vue应用挂载失败:', e);
+    }
+  </script>
+</body>
+</html>
