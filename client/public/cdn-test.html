@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudHost - CDN诊断</title>
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/vue-router@4.3.0/dist/vue-router.global.js"></script>
+  <script src="https://unpkg.com/axios@1.6.7/dist/axios.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 40px; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; }
+    h1 { color: #1890ff; }
+    .test { padding: 15px; margin: 10px 0; border-radius: 4px; }
+    .success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+    .error { background: #fff2f0; border: 1px solid #ffccc7; color: #ff4d4f; }
+    #app { margin-top: 20px; }
+    .home-page { text-align: center; padding: 40px; }
+    .home-page h2 { color: #333; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="container">
+      <h1>☁️ CloudHost CDN测试</h1>
+      
+      <div v-if="loading">加载中...</div>
+      <div v-else class="home-page">
+        <h2>CDN加载的Vue应用</h2>
+        <p>如果看到这个内容，说明CDN加载成功！</p>
+        <p>用户名: <input v-model="username" placeholder="输入用户名"></p>
+        <p>密码: <input type="password" v-model="password" placeholder="输入密码"></p>
+        <button @click="login">登录测试</button>
+        <p>{{ loginResult }}</p>
+        <p style="margin-top: 30px;">
+          <a href="/">返回首页</a> | 
+          <a href="/test.html">测试页</a> | 
+          <a href="/vue-test.html">Vue诊断</a>
+        </p>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    const { createApp, ref, onMounted } = Vue;
+    const { createRouter, createWebHashHistory } = VueRouter;
+    
+    const Home = {
+      template: '<div><h2>首页</h2><p>这是使用CDN加载的首页</p></div>'
+    };
+    
+    const Login = {
+      template: '<div><h2>登录页</h2><input v-model="username" placeholder="用户名"><button @click="handleLogin">登录</button></div>',
+      data() { return { username: '' }; },
+      methods: {
+        handleLogin() { alert('登录功能演示'); }
+      }
+    };
+    
+    const routes = [
+      { path: '/', component: Home },
+      { path: '/login', component: Login }
+    ];
+    
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes
+    });
+    
+    const app = createApp({
+      setup() {
+        const loading = ref(true);
+        const username = ref('');
+        const password = ref('');
+        const loginResult = ref('');
+        
+        onMounted(() => {
+          setTimeout(() => {
+            loading.value = false;
+            console.log('Vue Router应用挂载成功');
+          }, 500);
+        });
+        
+        const login = async () => {
+          loginResult.value = '尝试登录: ' + username.value;
+          try {
+            const res = await axios.post('/api/auth/login', {
+              username: username.value,
+              password: password.value
+            });
+            loginResult.value = '登录结果: ' + JSON.stringify(res.data);
+          } catch (err) {
+            loginResult.value = '登录请求已发送（预期失败，因为这是演示）';
+          }
+        };
+        
+        return { loading, username, password, loginResult, login };
+      }
+    });
+    
+    app.use(router);
+    app.mount('#app');
+    
+    console.log('CloudHost CDN应用已挂载');
+  </script>
+</body>
+</html>
