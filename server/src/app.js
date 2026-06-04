@@ -11,15 +11,8 @@ const app = express()
 const PORT = process.env.APP_PORT || 8080
 
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "https://"]
-    }
-  }
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
 }))
 app.use(cors())
 app.use(morgan('dev'))
