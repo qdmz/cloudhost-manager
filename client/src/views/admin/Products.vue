@@ -146,7 +146,7 @@
         <a-form-item label="流量限制(GB)" name="traffic">
           <a-input-number v-model:value="planForm.traffic" :min="0" style="width: 100%" />
         </a-form-item>
-      </a-form-item>
+      </a-form>
     </a-modal>
   </div>
 </template>
