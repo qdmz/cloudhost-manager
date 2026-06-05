@@ -21,7 +21,13 @@ const initTransporter = async () => {
     const smtpPort = configMap.smtp_port || process.env.SMTP_PORT
     const smtpUser = configMap.smtp_user || process.env.SMTP_USER
     const smtpPass = configMap.smtp_pass || process.env.SMTP_PASS
-    const smtpSecure = configMap.smtp_secure !== undefined ? configMap.smtp_secure : process.env.SMTP_SECURE === 'true'
+    // 处理 SSL 配置 - 需要转换为布尔值
+    let smtpSecure = false
+    if (configMap.smtp_secure !== undefined) {
+      smtpSecure = configMap.smtp_secure === true || configMap.smtp_secure === 'true'
+    } else if (process.env.SMTP_SECURE) {
+      smtpSecure = process.env.SMTP_SECURE === true || process.env.SMTP_SECURE === 'true'
+    }
     
     if (smtpHost && smtpUser) {
       transporter = nodemailer.createTransport({
