@@ -8,7 +8,8 @@ const { getConfigs } = require('./config');
 class EpayService {
     
     constructor() {
-        this.signType = 'RSA';
+        // 可以在配置中设置 sign_type，默认 MD5，很多易支付系统使用 MD5
+        this.defaultSignType = 'MD5';
     }
     
     /**
@@ -22,8 +23,24 @@ class EpayService {
             epayKey: configs.epay_key || process.env.EPAY_KEY,
             epayPrivateKey: configs.epay_private_key || process.env.EPAY_PRIVATE_KEY,
             epayPublicKey: configs.epay_public_key || process.env.EPAY_PUBLIC_KEY,
-            siteUrl: configs.site_url || process.env.SITE_URL
+            siteUrl: configs.site_url || process.env.SITE_URL,
+            signType: configs.epay_sign_type || process.env.EPAY_SIGN_TYPE || this.defaultSignType
         };
+    }
+    
+    /**
+     * MD5 签名
+     */
+    md5Sign(data, key) {
+        return crypto.createHash('md5').update(data + key).digest('hex');
+    }
+    
+    /**
+     * MD5 验签
+     */
+    md5Verify(data, sign, key) {
+        const expectedSign = this.md5Sign(data, key);
+        return expectedSign === sign;
     }
     
     /**
@@ -78,6 +95,13 @@ class EpayService {
     async createPayment(orderId, name, money, type = 'alipay') {
         const config = await this.getConfig();
         
+        console.log('[Epay Config:', {
+            epayUrl: config.epayUrl,
+            epayPid: config.epayPid,
+            siteUrl: config.siteUrl,
+            signType: config.signType
+        });
+        
         const params = {
             pid: config.epayPid,
             type: type,
@@ -85,16 +109,21 @@ class EpayService {
             notify_url: `${config.siteUrl}/api/pay/notify`,
             return_url: `${config.siteUrl}/#/orders`,
             name: name,
-            money: money,
-            timestamp: Math.floor(Date.now() / 1000).toString()
+            money: money
         };
         
         // 签名
         const signString = this.generateSignString(params);
-        const sign = this.rsaSign(signString, config.epayPrivateKey);
+        let sign;
+        if (config.signType === 'RSA') {
+            sign = this.rsaSign(signString, config.epayPrivateKey);
+        } else {
+            // 默认 MD5
+            sign = this.md5Sign(signString, config.epayKey);
+        }
         
         params.sign = sign;
-        params.sign_type = this.signType;
+        params.sign_type = config.signType;
         
         // 构建支付链接
         let payUrl = config.epayUrl;
@@ -106,6 +135,10 @@ class EpayService {
         }
         payUrl += queryParams.join('&');
         
+        console.log('[Epay] Generated Pay URL:', payUrl);
+        console.log('[Epay] Sign String:', signString);
+        console.log('[Epay] Sign:', sign);
+        
         return payUrl;
     }
     
@@ -116,7 +149,15 @@ class EpayService {
         const config = await this.getConfig();
         
         const signString = this.generateSignString(params);
-        return this.rsaVerify(signString, params.sign, config.epayPublicKey);
+        console.log('[Epay] Verify Notify - Sign String:', signString);
+        console.log('[Epay] Verify Notify - Received Sign:', params.sign);
+        
+        if (params.sign_type === 'RSA' || config.signType === 'RSA') {
+            return this.rsaVerify(signString, params.sign, config.epayPublicKey);
+        } else {
+            // 默认 MD5
+            return this.md5Verify(signString, params.sign, config.epayKey);
+        }
     }
     
     /**
