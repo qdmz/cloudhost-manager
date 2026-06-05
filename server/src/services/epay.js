@@ -30,9 +30,14 @@ class EpayService {
     
     /**
      * MD5 签名
+     * 易支付规则：参数按key升序排列，拼接成key=value&key=value格式，最后拼接密钥
      */
     md5Sign(data, key) {
-        return crypto.createHash('md5').update(data + key).digest('hex');
+        const signStr = data + key;
+        console.log('[Epay MD5] Sign String:', signStr);
+        const result = crypto.createHash('md5').update(signStr).digest('hex');
+        console.log('[Epay MD5] Result:', result);
+        return result;
     }
     
     /**
@@ -99,7 +104,9 @@ class EpayService {
             epayUrl: config.epayUrl,
             epayPid: config.epayPid,
             siteUrl: config.siteUrl,
-            signType: config.signType
+            signType: config.signType,
+            epayKey: config.epayKey ? `***${config.epayKey.substring(0, 8)}***` : '未配置',
+            epayKeyLength: config.epayKey ? config.epayKey.length : 0
         });
         
         const params = {
@@ -112,7 +119,7 @@ class EpayService {
             money: money
         };
         
-        // 签名
+        // 签名 - 使用原始参数值（不URL编码）
         const signString = this.generateSignString(params);
         let sign;
         if (config.signType === 'RSA') {
@@ -125,7 +132,7 @@ class EpayService {
         params.sign = sign;
         params.sign_type = config.signType;
         
-        // 构建支付链接
+        // 构建支付链接 - 参数值需要URL编码
         let payUrl = config.epayUrl;
         payUrl += (payUrl.includes('?') ? '&' : '?');
         
@@ -136,7 +143,7 @@ class EpayService {
         payUrl += queryParams.join('&');
         
         console.log('[Epay] Generated Pay URL:', payUrl);
-        console.log('[Epay] Sign String:', signString);
+        console.log('[Epay] Sign String (for MD5):', signString);
         console.log('[Epay] Sign:', sign);
         
         return payUrl;

@@ -420,9 +420,31 @@ router.get('/tickets', auth, admin, async (req, res) => {
   }
 })
 
+router.get('/tickets/:id', auth, admin, async (req, res) => {
+  try {
+    const ticket = await Ticket.findOne({
+      where: { id: req.params.id },
+      include: [
+        { model: User, as: 'user', attributes: ['username', 'email'] },
+        {
+          model: TicketMessage,
+          include: [{ model: User, as: 'user', attributes: ['username'] }]
+        }
+      ]
+    })
+    
+    if (!ticket) return res.json({ code: 404, message: '工单不存在' })
+    
+    res.json({ code: 200, data: ticket })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取失败' })
+  }
+})
+
 router.post('/tickets/:id/reply', auth, admin, async (req, res) => {
   try {
-    const { content } = req.body
+    const { content, status = 'answered' } = req.body
     const ticket = await Ticket.findByPk(req.params.id)
     
     await TicketMessage.create({
@@ -432,12 +454,27 @@ router.post('/tickets/:id/reply', auth, admin, async (req, res) => {
       is_admin: true
     })
     
-    await ticket.update({ status: 'answered' })
+    await ticket.update({ status })
     
     res.json({ code: 200, message: '回复成功' })
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: '回复失败' })
+  }
+})
+
+router.post('/tickets/:id/close', auth, admin, async (req, res) => {
+  try {
+    const ticket = await Ticket.findByPk(req.params.id)
+    
+    if (!ticket) return res.json({ code: 404, message: '工单不存在' })
+    
+    await ticket.update({ status: 'closed' })
+    
+    res.json({ code: 200, message: '工单已关闭' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '操作失败' })
   }
 })
 

@@ -66,6 +66,12 @@ const routes = [
         meta: { title: '公告中心' }
       },
       {
+        path: 'announcements/:id',
+        name: 'AnnouncementDetail',
+        component: () => import('@/views/AnnouncementDetail.vue'),
+        meta: { title: '公告详情' }
+      },
+      {
         path: 'user-center',
         name: 'UserCenter',
         component: () => import('@/views/UserCenter.vue'),
@@ -131,6 +137,12 @@ const routes = [
           name: 'AdminTickets',
           component: () => import('@/views/admin/Tickets.vue'),
           meta: { title: '工单管理', requiresAdmin: true }
+        },
+        {
+          path: 'tickets/:id',
+          name: 'AdminTicketDetail',
+          component: () => import('@/views/admin/TicketDetail.vue'),
+          meta: { title: '工单详情', requiresAdmin: true }
         },
       {
         path: 'products',
