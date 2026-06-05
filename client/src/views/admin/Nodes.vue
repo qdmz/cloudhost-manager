@@ -108,6 +108,48 @@
         </template>
       </a-table>
     </a-modal>
+    
+    <a-modal v-model:open="showAddImageModal" title="添加镜像" width="600px" @ok="handleAddImage">
+      <a-form :model="imageForm" layout="vertical">
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="镜像名称" name="name">
+              <a-input v-model:value="imageForm.name" placeholder="如: Ubuntu 22.04" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="操作系统" name="os">
+              <a-select v-model:value="imageForm.os">
+                <a-select-option value="ubuntu">Ubuntu</a-select-option>
+                <a-select-option value="debian">Debian</a-select-option>
+                <a-select-option value="centos">CentOS</a-select-option>
+                <a-select-option value="windows">Windows</a-select-option>
+                <a-select-option value="other">其他</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="版本" name="version">
+              <a-input v-model:value="imageForm.version" placeholder="如: 22.04" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="架构" name="arch">
+              <a-select v-model:value="imageForm.arch">
+                <a-select-option value="amd64">amd64</a-select-option>
+                <a-select-option value="i386">i386</a-select-option>
+                <a-select-option value="arm64">arm64</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="模板路径" name="template">
+          <a-input v-model:value="imageForm.template" placeholder="如: local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -222,6 +264,23 @@ const manageImages = async (node) => {
 const editImage = (image) => {
   imageForm.value = { ...image }
   showAddImageModal.value = true
+}
+
+const handleAddImage = async () => {
+  try {
+    imageForm.value.node_id = currentNode.value.id
+    if (imageForm.value.id) {
+      await updateImage(imageForm.value.id, imageForm.value)
+      message.success('更新成功')
+    } else {
+      await createImage(imageForm.value)
+      message.success('添加成功')
+    }
+    showAddImageModal.value = false
+    if (currentNode.value) manageImages(currentNode.value)
+  } catch (error) {
+    message.error(error.message)
+  }
 }
 
 const deleteImage = async (id) => {
