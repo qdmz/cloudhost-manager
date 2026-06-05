@@ -87,8 +87,18 @@ const viewOrder = (order) => {
   message.info('订单详情：' + order.order_no)
 }
 
-const payOrder = (order) => {
-  message.info('正在跳转到支付页面...')
+const payOrder = async (order) => {
+  try {
+    message.info('正在跳转到支付页面...')
+    const res = await getPayUrl(order.id, { payment_method: 'alipay' })
+    if (res.data && res.data.pay_url) {
+      window.location.href = res.data.pay_url
+    } else {
+      message.error('支付链接获取失败')
+    }
+  } catch (error) {
+    message.error(error.message || '支付失败')
+  }
 }
 
 const cancelOrder = async (order) => {
