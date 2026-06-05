@@ -125,7 +125,7 @@ const currentNode = ref(null)
 const images = ref([])
 
 const nodeForm = ref({
-  name: '', type: 'pve', host: '', api_user: '', api_token: '',
+  id: null, name: '', type: 'pve', host: '', api_user: '', api_token: '',
   location: '', nat_bridge: 'vmbr1', ipv6_bridge: 'vmbr2',
   nat_subnet: '', ipv6_subnet: '', note: ''
 })
@@ -164,8 +164,13 @@ const fetchNodes = async () => {
 
 const handleAdd = async () => {
   try {
-    await createNode(nodeForm.value)
-    message.success('添加成功')
+    if (nodeForm.value.id) {
+      await updateNode(nodeForm.value.id, nodeForm.value)
+      message.success('更新成功')
+    } else {
+      await createNode(nodeForm.value)
+      message.success('添加成功')
+    }
     showAddModal.value = false
     fetchNodes()
   } catch (error) {
