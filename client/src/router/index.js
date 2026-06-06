@@ -209,6 +209,12 @@ const routes = [
         name: 'AdminRecharges',
         component: () => import('@/views/admin/Recharges.vue'),
         meta: { title: '充值记录', requiresAdmin: true }
+      },
+      {
+        path: 'backup',
+        name: 'AdminBackup',
+        component: () => import('@/views/admin/Backup.vue'),
+        meta: { title: '数据备份', requiresAdmin: true }
       }
     ]
   },

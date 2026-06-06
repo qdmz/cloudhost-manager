@@ -1160,4 +1160,96 @@ router.get('/balance-logs', auth, admin, async (req, res) => {
   }
 })
 
+// 备份恢复管理
+router.get('/backups', auth, admin, async (req, res) => {
+  try {
+    const backupService = require('../services/backup')
+    const backups = await backupService.getBackupList()
+    const dirSize = await backupService.getBackupDirSize()
+    
+    res.json({
+      code: 200,
+      data: {
+        list: backups,
+        total_size: dirSize
+      }
+    })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取备份列表失败: ' + error.message })
+  }
+})
+
+router.post('/backups/create', auth, admin, async (req, res) => {
+  try {
+    const backupService = require('../services/backup')
+    const result = await backupService.createFullBackup()
+    
+    res.json({
+      code: 200,
+      message: '备份创建成功',
+      data: result
+    })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '备份创建失败: ' + error.message })
+  }
+})
+
+router.post('/backups/:name/restore', auth, admin, async (req, res) => {
+  try {
+    const { name } = req.params
+    const { restore_database = true, restore_files = false } = req.body
+    
+    // 重要提示：恢复前应该先备份当前数据
+    res.json({
+      code: 200,
+      message: '恢复任务已提交，请等待完成',
+      data: {
+        name,
+        status: 'restoring'
+      }
+    })
+    
+    const backupService = require('../services/backup')
+    await backupService.restoreFullBackup(name, {
+      restoreDatabase: restore_database,
+      restoreFiles: restore_files
+    })
+    
+    console.log(`[Backup] Restore completed for: ${name}`)
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '恢复失败: ' + error.message })
+  }
+})
+
+router.delete('/backups/:name', auth, admin, async (req, res) => {
+  try {
+    const { name } = req.params
+    const backupService = require('../services/backup')
+    await backupService.deleteBackup(name)
+    
+    res.json({ code: 200, message: '备份已删除' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '删除失败: ' + error.message })
+  }
+})
+
+router.get('/backups/:name/download', auth, admin, async (req, res) => {
+  try {
+    const { name } = req.params
+    const { type = 'database' } = req.query
+    
+    const backupService = require('../services/backup')
+    const file = await backupService.downloadBackup(name, type)
+    
+    res.download(file.path, file.name)
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '下载失败: ' + error.message })
+  }
+})
+
 module.exports = router
