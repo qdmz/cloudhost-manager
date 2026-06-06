@@ -14,7 +14,7 @@
           <strong>{{ record.order_no }}</strong>
         </template>
         <template v-else-if="column.key === 'product'">
-          {{ record.product_name }} × {{ record.quantity }}
+          {{ record.product?.name || '' }} × {{ record.quantity }}
         </template>
         <template v-else-if="column.key === 'amount'">
           <span class="text-error">¥{{ record.amount }}</span>
@@ -38,6 +38,32 @@
         </template>
       </template>
     </a-table>
+    
+    <!-- 支付选择弹窗 -->
+    <a-modal
+      v-model:open="showPaymentModal"
+      title="选择支付方式"
+      :footer="null"
+      width="500px"
+    >
+      <div class="payment-modal-content">
+        <a-form layout="vertical">
+          <a-form-item label="支付方式">
+            <a-radio-group v-model:value="selectedPaymentMethod">
+              <a-radio value="alipay">支付宝</a-radio>
+              <a-radio value="wechat">微信支付</a-radio>
+              <a-radio value="qqpay">QQ钱包</a-radio>
+            </a-radio-group>
+          </a-form-item>
+        </a-form>
+        <div class="modal-actions">
+          <a-button @click="showPaymentModal = false">取消</a-button>
+          <a-button type="primary" @click="confirmPay" :loading="paying">
+            立即支付
+          </a-button>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -49,6 +75,10 @@ import dayjs from 'dayjs'
 
 const loading = ref(false)
 const orders = ref([])
+const showPaymentModal = ref(false)
+const selectedPaymentMethod = ref('alipay')
+const paying = ref(false)
+const currentOrder = ref(null)
 
 const columns = [
   { title: '订单号', key: 'order_no' },
@@ -87,17 +117,27 @@ const viewOrder = (order) => {
   message.info('订单详情：' + order.order_no)
 }
 
-const payOrder = async (order) => {
+const payOrder = (order) => {
+  currentOrder.value = order
+  selectedPaymentMethod.value = 'alipay'
+  showPaymentModal.value = true
+}
+
+const confirmPay = async () => {
+  paying.value = true
   try {
-    message.info('正在跳转到支付页面...')
-    const res = await getPayUrl(order.id, { payment_method: 'alipay' })
+    message.info('正在跳转支付页面...')
+    const res = await getPayUrl(currentOrder.value.id, { payment_method: selectedPaymentMethod.value })
     if (res.data && res.data.pay_url) {
       window.location.href = res.data.pay_url
     } else {
       message.error('支付链接获取失败')
     }
+    showPaymentModal.value = false
   } catch (error) {
     message.error(error.message || '支付失败')
+  } finally {
+    paying.value = false
   }
 }
 
@@ -115,3 +155,16 @@ onMounted(() => {
   fetchOrders()
 })
 </script>
+
+<style lang="scss" scoped>
+.payment-modal-content {
+  padding: 16px 0;
+  
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+  }
+}
+</style>

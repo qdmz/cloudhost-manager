@@ -82,6 +82,18 @@ const routes = [
         name: 'Authentication',
         component: () => import('@/views/Authentication.vue'),
         meta: { title: '实名认证', requiresAuth: true }
+      },
+      {
+        path: 'domain-bindings',
+        name: 'DomainBindings',
+        component: () => import('@/views/DomainBindings.vue'),
+        meta: { title: '域名绑定', requiresAuth: true }
+      },
+      {
+        path: 'port-forwards',
+        name: 'PortForwards',
+        component: () => import('@/views/PortForwards.vue'),
+        meta: { title: '端口转发', requiresAuth: true }
       }
     ]
   },
@@ -179,6 +191,24 @@ const routes = [
         name: 'AdminCustomCreate',
         component: () => import('@/views/admin/CustomCreate.vue'),
         meta: { title: '自定义开通', requiresAdmin: true }
+      },
+      {
+        path: 'domain-bindings',
+        name: 'AdminDomainBindings',
+        component: () => import('@/views/admin/DomainBindings.vue'),
+        meta: { title: '域名绑定管理', requiresAdmin: true }
+      },
+      {
+        path: 'port-forwards',
+        name: 'AdminPortForwards',
+        component: () => import('@/views/admin/PortForwards.vue'),
+        meta: { title: '端口转发管理', requiresAdmin: true }
+      },
+      {
+        path: 'recharges',
+        name: 'AdminRecharges',
+        component: () => import('@/views/admin/Recharges.vue'),
+        meta: { title: '充值记录', requiresAdmin: true }
       }
     ]
   },

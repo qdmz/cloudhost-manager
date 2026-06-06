@@ -47,6 +47,8 @@ app.use('/api/announcements', require('./routes/announcements'))
 app.use('/api/vouchers', require('./routes/vouchers'))
 app.use('/api/admin', require('./routes/admin'))
 app.use('/api/pay', require('./routes/pay'))
+app.use('/api/domain-bindings', require('./routes/domain_bindings'))
+app.use('/api/port-forwards', require('./routes/port_forwards'))
 
 app.get('/api/health', (req, res) => {
   res.json({ code: 200, message: 'OK' })

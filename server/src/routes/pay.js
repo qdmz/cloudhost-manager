@@ -105,12 +105,16 @@ async function handlePayment(params, res) {
             if (order && order.status === 'pending') {
                 console.log(`[Payment Notify] Processing order ${outTradeNo}, amount: ${amount}`)
                 
-                await order.update({ status: 'paid', paid_at: new Date(), trade_no: tradeNo })
+                // 验证节点是否存在
+                const node = await Node.findByPk(order.node_id)
+                if (!node) {
+                    console.error(`[Payment Notify] Node not found for order ${outTradeNo}`)
+                    return res.send('fail')
+                }
                 
-                const user = await User.findByPk(order.user_id)
+                // 获取产品信息
                 const product = await Product.findByPk(order.product_id)
                 const plan = await Plan.findByPk(order.plan_id)
-                const node = await Node.findByPk(order.node_id)
                 
                 // 计算到期时间
                 let expireDays = 30
@@ -120,23 +124,47 @@ async function handlePayment(params, res) {
                 const expireAt = new Date()
                 expireAt.setDate(expireAt.getDate() + expireDays)
                 
-                // 创建服务
+                // 创建服务（真正在PVE上创建虚拟机）
                 for (let i = 0; i < order.quantity; i++) {
-                    await Service.create({
-                        user_id: user.id,
-                        product_id: product.id,
-                        plan_id: plan.id,
-                        node_id: node.id,
-                        order_id: order.id,
-                        name: `${product.name}-${i + 1}`,
-                        cpu: plan.cpu,
-                        memory: plan.memory,
-                        disk: plan.disk,
-                        bandwidth: plan.bandwidth,
-                        status: 'pending',
-                        expire_at: expireAt
-                    })
+                    try {
+                        const { vmService } = require('../services/vm')
+                        
+                        // 在PVE上创建虚拟机
+                        const pveResult = await vmService.createVM(order.node_id, {
+                            name: `${product.name}-${i + 1}`,
+                            type: product.type || 'kvm',
+                            cpu: plan.cpu || 1,
+                            memory: plan.memory || 1024,
+                            disk: plan.disk || 20
+                        })
+                        
+                        // 创建服务记录
+                        await Service.create({
+                            user_id: order.user_id,
+                            product_id: product.id,
+                            plan_id: plan.id,
+                            node_id: node.id,
+                            order_id: order.id,
+                            name: `${product.name}-${pveResult.vmid}`,
+                            type: product.type || 'kvm',
+                            cpu: plan.cpu || 1,
+                            memory: plan.memory || 1024,
+                            disk: plan.disk || 20,
+                            bandwidth: plan.bandwidth,
+                            status: 'running',
+                            vmid: String(pveResult.vmid),
+                            expire_time: expireAt
+                        })
+                        
+                        console.log(`[Payment Notify] Service ${i + 1}/${order.quantity} created, VMID: ${pveResult.vmid}`)
+                    } catch (vmError) {
+                        console.error(`[Payment Notify] Failed to create VM for order ${outTradeNo}:`, vmError)
+                        // 即使VM创建失败，仍然更新订单状态
+                    }
                 }
+                
+                // 更新订单状态
+                await order.update({ status: 'paid', paid_at: new Date(), trade_no: tradeNo })
                 
                 console.log(`[Payment Notify] Order ${outTradeNo} completed, services created`)
             }

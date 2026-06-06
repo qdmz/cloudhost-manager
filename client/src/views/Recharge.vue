@@ -95,7 +95,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useUserStore } from '@/store/user'
-import { recharge, getVouchers, getRechargeRecords } from '@/api/recharge'
+import { recharge, getVouchers, getRechargeRecords, useVoucher } from '@/api/recharge'
 import { message } from 'ant-design-vue'
 import { GiftOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'

@@ -36,6 +36,15 @@
         <router-link to="/admin/custom-create" class="menu-item" :class="{ active: $route.path === '/admin/custom-create' }">
           <EditOutlined /> 自定义开通
         </router-link>
+        <router-link to="/admin/domain-bindings" class="menu-item" :class="{ active: $route.path === '/admin/domain-bindings' }">
+          <LinkOutlined /> 域名绑定
+        </router-link>
+        <router-link to="/admin/port-forwards" class="menu-item" :class="{ active: $route.path === '/admin/port-forwards' }">
+          <SwapOutlined /> 端口转发
+        </router-link>
+        <router-link to="/admin/recharges" class="menu-item" :class="{ active: $route.path === '/admin/recharges' }">
+          <DollarOutlined /> 充值记录
+        </router-link>
       </nav>
     </aside>
     
@@ -89,7 +98,10 @@ import {
   NotificationOutlined,
   SettingOutlined,
   EditOutlined,
-  HomeOutlined
+  HomeOutlined,
+  LinkOutlined,
+  SwapOutlined,
+  DollarOutlined
 } from '@ant-design/icons-vue'
 
 const router = useRouter()

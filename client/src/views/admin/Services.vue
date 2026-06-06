@@ -14,7 +14,8 @@
         <template v-else-if="column.key === 'action'">
           <a-space>
             <a-button size="small" @click="viewDetail(record)">详情</a-button>
-            <a-button size="small" @click="editService(record)">编辑</a-button>
+            <a-button size="small" @click="openEditModal(record)">编辑</a-button>
+            <a-button size="small" type="dashed" @click="openTransferModal(record)">转移</a-button>
             <a-popconfirm title="确定删除？" @confirm="handleDelete(record.id)">
               <a-button size="small" danger>删除</a-button>
             </a-popconfirm>
@@ -22,13 +23,48 @@
         </template>
       </template>
     </a-table>
+    
+    <!-- 编辑服务弹窗 -->
+    <a-modal v-model:open="showEditModal" title="编辑服务" @ok="handleEditOk" @cancel="showEditModal = false" :confirmLoading="editLoading">
+      <a-form :model="editForm" layout="vertical">
+        <a-form-item label="服务名称">
+          <a-input v-model:value="editForm.name" placeholder="请输入服务名称" />
+        </a-form-item>
+        <a-form-item label="CPU">
+          <a-input-number v-model:value="editForm.cpu" :min="1" />
+        </a-form-item>
+        <a-form-item label="内存(MB)">
+          <a-input-number v-model:value="editForm.memory" :min="128" />
+        </a-form-item>
+        <a-form-item label="磁盘(GB)">
+          <a-input-number v-model:value="editForm.disk" :min="1" />
+        </a-form-item>
+        <a-form-item label="状态">
+          <a-select v-model:value="editForm.status" style="width: 100%">
+            <a-select-option value="running">运行中</a-select-option>
+            <a-select-option value="stopped">已停止</a-select-option>
+            <a-select-option value="pending">待开通</a-select-option>
+            <a-select-option value="error">异常</a-select-option>
+          </a-select>
+        </a-form-item>
+      </a-form>
+    </a-modal>
+    
+    <!-- 转移服务弹窗 -->
+    <a-modal v-model:open="showTransferModal" title="转移虚拟机" @ok="handleTransferOk" @cancel="showTransferModal = false" :confirmLoading="transferLoading">
+      <a-form :model="transferForm" layout="vertical">
+        <a-form-item label="目标用户ID">
+          <a-input v-model:value="transferForm.target_user_id" placeholder="请输入目标用户ID" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
-import { getServices, deleteService } from '@/api/admin'
+import { getServices, deleteService, updateService, transferService, getUsers } from '@/api/admin'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -38,6 +74,26 @@ const pagination = ref({
   current: 1,
   pageSize: 20,
   total: 0
+})
+
+// 编辑相关
+const showEditModal = ref(false)
+const editLoading = ref(false)
+const editingService = ref(null)
+const editForm = ref({
+  name: '',
+  cpu: 1,
+  memory: 1024,
+  disk: 20,
+  status: 'running'
+})
+
+// 转移相关
+const showTransferModal = ref(false)
+const transferLoading = ref(false)
+const transferringService = ref(null)
+const transferForm = ref({
+  target_user_id: ''
 })
 
 const columns = [
@@ -50,7 +106,7 @@ const columns = [
   { title: '磁盘(GB)', dataIndex: 'disk' },
   { title: '状态', key: 'status' },
   { title: '到期时间', dataIndex: 'expire_time' },
-  { title: '操作', key: 'action', width: 200 }
+  { title: '操作', key: 'action', width: 300 }
 ]
 
 const getStatusColor = (status) => {
@@ -78,7 +134,7 @@ const fetchServices = async () => {
   try {
     const res = await getServices({
       page: pagination.value.current,
-      page_size: pagination.value.pageSize
+      pageSize: pagination.value.pageSize
     })
     services.value = res.data.list
     pagination.value.total = res.data.total
@@ -93,8 +149,54 @@ const viewDetail = (record) => {
   router.push(`/service/${record.id}`)
 }
 
-const editService = (record) => {
-  message.info('编辑功能开发中')
+const openEditModal = (record) => {
+  editingService.value = record
+  editForm.value = {
+    name: record.name || '',
+    cpu: record.cpu || 1,
+    memory: record.memory || 1024,
+    disk: record.disk || 20,
+    status: record.status || 'running'
+  }
+  showEditModal.value = true
+}
+
+const handleEditOk = async () => {
+  editLoading.value = true
+  try {
+    await updateService(editingService.value.id, editForm.value)
+    message.success('更新成功')
+    showEditModal.value = false
+    fetchServices()
+  } catch (error) {
+    message.error(error.message || '更新失败')
+  } finally {
+    editLoading.value = false
+  }
+}
+
+const openTransferModal = (record) => {
+  transferringService.value = record
+  transferForm.value.target_user_id = ''
+  showTransferModal.value = true
+}
+
+const handleTransferOk = async () => {
+  if (!transferForm.value.target_user_id) {
+    message.warning('请输入目标用户ID')
+    return
+  }
+  transferLoading.value = true
+  try {
+    await transferService(transferringService.value.id, transferForm.value)
+    message.success('转移成功')
+    showTransferModal.value = false
+    fetchServices()
+  } catch (error) {
+    message.error(error.message || '转移失败')
+  } finally {
+    transferLoading.value = false
+  }
 }
 
 const handleDelete = async (id) => {

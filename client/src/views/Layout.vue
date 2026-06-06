@@ -56,6 +56,16 @@
                       <WalletOutlined /> 充值中心
                     </router-link>
                   </a-menu-item>
+                  <a-menu-item key="domain-bindings">
+                    <router-link to="/domain-bindings">
+                      <LinkOutlined /> 域名绑定
+                    </router-link>
+                  </a-menu-item>
+                  <a-menu-item key="port-forwards">
+                    <router-link to="/port-forwards">
+                      <SwapOutlined /> 端口转发
+                    </router-link>
+                  </a-menu-item>
                   <a-menu-divider />
                   <a-menu-item key="logout" @click="handleLogout">
                     <LogoutOutlined /> 退出登录
@@ -99,7 +109,9 @@ import {
   WalletOutlined,
   LogoutOutlined,
   CloudServerOutlined,
-  ShoppingCartOutlined
+  ShoppingCartOutlined,
+  LinkOutlined,
+  SwapOutlined
 } from '@ant-design/icons-vue'
 
 const router = useRouter()

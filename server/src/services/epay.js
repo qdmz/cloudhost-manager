@@ -115,9 +115,14 @@ class EpayService {
             epayKeyLength: config.epayKey ? config.epayKey.length : 0
         });
         
+        // 映射支付方式类型到易支付标准类型
+        let epayType = type;
+        if (type === 'wechat') epayType = 'wxpay';
+        if (type === 'qqpay') epayType = 'qqpay';
+        
         const params = {
             pid: config.epayPid,
-            type: type,
+            type: epayType,
             out_trade_no: orderId,
             notify_url: `${config.siteUrl}/api/pay/notify`,
             return_url: `${config.siteUrl}/#/orders`,

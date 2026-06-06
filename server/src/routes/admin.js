@@ -1,6 +1,6 @@
 const express = require('express')
 const router = express.Router()
-const { User, Service, Product, Plan, Order, Node, Ticket, TicketMessage, Announcement, Recharge, Voucher, BalanceLog, AuthRequest, Image, Config } = require('../models')
+const { User, Service, Product, Plan, Order, Node, Ticket, TicketMessage, Announcement, Recharge, Voucher, BalanceLog, AuthRequest, Image, Config, DomainBinding, PortForward } = require('../models')
 const { auth, admin } = require('../middleware/auth')
 const { Op } = require('sequelize')
 const bcrypt = require('bcryptjs')
@@ -171,12 +171,43 @@ router.get('/orders', auth, admin, async (req, res) => {
 
 router.post('/orders/:id/process', auth, admin, async (req, res) => {
   try {
+    const { vmService } = require('../services/vm')
+    
     const order = await Order.findByPk(req.params.id, {
       include: [{ model: Plan, as: 'plan' }]
     })
     
     if (!order) return res.json({ code: 404, message: '订单不存在' })
     
+    // 验证节点是否存在
+    const node = await Node.findByPk(order.node_id)
+    if (!node) {
+      return res.json({ code: 404, message: '订单中指定的节点不存在' })
+    }
+    
+    // 获取套餐配置
+    const plan = order.plan
+    const cpu = plan ? plan.cpu : 1
+    const memory = plan ? plan.memory : 1024
+    const disk = plan ? plan.disk : 20
+    const osType = plan ? 'lxc' : 'kvm'
+    
+    // 在PVE上创建虚拟机
+    let pveResult
+    try {
+      pveResult = await vmService.createVM(order.node_id, {
+        name: `VPS-${Date.now()}`,
+        type: osType,
+        cpu: cpu,
+        memory: memory,
+        disk: disk
+      })
+    } catch (pveError) {
+      console.error('PVE创建失败:', pveError)
+      return res.json({ code: 500, message: `PVE节点创建失败: ${pveError.message}` })
+    }
+    
+    // 更新订单状态
     await order.update({ status: 'completed', paid_at: new Date() })
     
     let days = 30
@@ -185,25 +216,35 @@ router.post('/orders/:id/process', auth, admin, async (req, res) => {
     
     const expireTime = dayjs().add(days, 'day').toDate()
     
+    // 创建服务记录
     await Service.create({
       user_id: order.user_id,
       node_id: order.node_id,
       product_id: order.product_id,
       plan_id: order.plan_id,
-      name: `VPS-${Date.now()}`,
-      type: 'kvm',
+      name: `VPS-${pveResult.vmid}`,
+      type: osType,
       status: 'running',
-      cpu: 1,
-      memory: 1024,
-      disk: 20,
+      cpu: cpu,
+      memory: memory,
+      disk: disk,
+      vmid: String(pveResult.vmid),
       price: order.amount / order.quantity,
       expire_time: expireTime
     })
     
-    res.json({ code: 200, message: '订单处理成功' })
+    res.json({ 
+      code: 200, 
+      message: `订单处理成功 (VMID: ${pveResult.vmid})`,
+      data: {
+        vmid: pveResult.vmid,
+        type: pveResult.type,
+        node: node.name
+      }
+    })
   } catch (error) {
     console.error(error)
-    res.json({ code: 500, message: '处理失败' })
+    res.json({ code: 500, message: '处理失败: ' + error.message })
   }
 })
 
@@ -309,7 +350,15 @@ router.post('/nodes', auth, admin, async (req, res) => {
 
 router.put('/nodes/:id', auth, admin, async (req, res) => {
   try {
-    await Node.update(req.body, { where: { id: req.params.id } })
+    // 如果包含敏感信息，进行处理
+    const updateData = { ...req.body }
+    
+    // 不允许直接修改密码为空
+    if (updateData.ssh_password === '') {
+      delete updateData.ssh_password
+    }
+    
+    await Node.update(updateData, { where: { id: req.params.id } })
     res.json({ code: 200, message: '修改成功' })
   } catch (error) {
     console.error(error)
@@ -317,8 +366,33 @@ router.put('/nodes/:id', auth, admin, async (req, res) => {
   }
 })
 
+router.post('/nodes/:id/test-ssh', auth, admin, async (req, res) => {
+  try {
+    const node = await Node.findByPk(req.params.id)
+    if (!node) {
+      return res.json({ code: 404, message: '节点不存在' })
+    }
+    
+    const sshService = require('../services/ssh')
+    const result = await sshService.testConnection(node.id)
+    
+    res.json({
+      code: result.success ? 200 : 400,
+      message: result.message,
+      data: result
+    })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: `SSH 测试失败: ${error.message}` })
+  }
+})
+
 router.delete('/nodes/:id', auth, admin, async (req, res) => {
   try {
+    // 关闭 SSH 连接
+    const sshService = require('../services/ssh')
+    await sshService.closeConnection(req.params.id)
+    
     await Node.destroy({ where: { id: req.params.id } })
     res.json({ code: 200, message: '删除成功' })
   } catch (error) {
@@ -608,9 +682,100 @@ router.put('/services/:id', auth, admin, async (req, res) => {
   }
 })
 
+router.post('/services/:id/transfer', auth, admin, async (req, res) => {
+  try {
+    const { target_user_id } = req.body
+    const service = await Service.findByPk(req.params.id)
+    
+    if (!service) {
+      return res.json({ code: 404, message: '服务不存在' })
+    }
+    
+    const targetUser = await User.findByPk(target_user_id)
+    if (!targetUser) {
+      return res.json({ code: 404, message: '目标用户不存在' })
+    }
+    
+    await service.update({ user_id: target_user_id })
+    res.json({ code: 200, message: '转移成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '转移失败' })
+  }
+})
+
+// 管理后台服务操作
+router.post('/services/:id/start', auth, admin, async (req, res) => {
+  try {
+    const { vmService } = require('../services/vm')
+    const service = await Service.findByPk(req.params.id)
+    
+    if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
+    
+    await vmService.startVM(service)
+    res.json({ code: 200, message: '开机成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: error.message || '开机失败' })
+  }
+})
+
+router.post('/services/:id/stop', auth, admin, async (req, res) => {
+  try {
+    const { vmService } = require('../services/vm')
+    const service = await Service.findByPk(req.params.id)
+    
+    if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
+    
+    await vmService.stopVM(service)
+    res.json({ code: 200, message: '关机成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: error.message || '关机失败' })
+  }
+})
+
+router.post('/services/:id/restart', auth, admin, async (req, res) => {
+  try {
+    const { vmService } = require('../services/vm')
+    const service = await Service.findByPk(req.params.id)
+    
+    if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
+    
+    await vmService.restartVM(service)
+    res.json({ code: 200, message: '重启成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: error.message || '重启失败' })
+  }
+})
+
 router.delete('/services/:id', auth, admin, async (req, res) => {
   try {
-    await Service.destroy({ where: { id: req.params.id } })
+    const { vmService } = require('../services/vm')
+    
+    const service = await Service.findByPk(req.params.id)
+    
+    if (!service) {
+      return res.json({ code: 404, message: '服务不存在' })
+    }
+    
+    // 如果有关联的真实VMID，先在PVE上删除虚拟机
+    if (service.vmid) {
+      try {
+        await vmService.deleteVM(service)
+        console.log(`[Admin] Deleted VM ${service.vmid} from PVE for service ${service.id}`)
+      } catch (vmError) {
+        console.error('[Admin] Failed to delete VM from PVE:', vmError)
+        // 即使PVE删除失败，也继续删除数据库记录
+      }
+    }
+    
+    // 删除数据库记录
+    await service.destroy()
     res.json({ code: 200, message: '删除成功' })
   } catch (error) {
     console.error(error)
@@ -620,14 +785,79 @@ router.delete('/services/:id', auth, admin, async (req, res) => {
 
 router.post('/services/custom-create', auth, admin, async (req, res) => {
   try {
+    const { vmService } = require('../services/vm')
+    
+    const {
+      user_id, node_id, name, type, cpu, memory, disk,
+      ipv4, ipv6, os, template, iso, clone_from_vmid, os_type
+    } = req.body
+    
+    // 验证节点是否存在
+    const node = await Node.findByPk(node_id)
+    if (!node) {
+      return res.json({ code: 404, message: '节点不存在' })
+    }
+    
+    // 验证用户是否存在
+    const user = await User.findByPk(user_id)
+    if (!user) {
+      return res.json({ code: 404, message: '用户不存在' })
+    }
+    
+    // 在PVE上创建虚拟机
+    const createOptions = {
+      name: name,
+      type: type || 'kvm',
+      cpu: cpu || 1,
+      memory: memory || 1024,
+      disk: disk || 20,
+      template: template,
+      iso: iso,
+      clone_from_vmid: clone_from_vmid,
+      os_type: os_type
+    }
+    
+    let pveResult
+    try {
+      pveResult = await vmService.createVM(node_id, createOptions)
+    } catch (pveError) {
+      console.error('PVE创建失败:', pveError)
+      return res.json({ code: 500, message: `PVE节点创建失败: ${pveError.message}` })
+    }
+    
+    // 在数据库中创建服务记录
     const service = await Service.create({
-      ...req.body,
-      status: 'running'
+      user_id: user_id,
+      node_id: node_id,
+      name: name || pveResult.message,
+      type: type || 'kvm',
+      status: 'running',
+      cpu: cpu || 1,
+      memory: memory || 1024,
+      disk: disk || 20,
+      vmid: String(pveResult.vmid),
+      ipv4: ipv4 || '',
+      ipv6: ipv6 || '',
+      os: os || 'Unknown',
+      price: 0,
+      expire_time: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
     })
-    res.json({ code: 200, message: '开通成功', data: service })
+    
+    res.json({
+      code: 200,
+      message: `虚拟机创建成功 (${pveResult.message})`,
+      data: {
+        service: service,
+        pve_result: {
+          vmid: pveResult.vmid,
+          type: pveResult.type,
+          node: pveResult.node
+        }
+      }
+    })
   } catch (error) {
     console.error(error)
-    res.json({ code: 500, message: '开通失败' })
+    res.json({ code: 500, message: '开通失败: ' + error.message })
   }
 })
 
@@ -677,6 +907,256 @@ router.put('/configs', auth, admin, async (req, res) => {
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: '保存失败' })
+  }
+})
+
+// 域名绑定管理
+router.get('/domain-bindings', auth, admin, async (req, res) => {
+  try {
+    const { page = 1, page_size = 20, service_id, status } = req.query
+    
+    const where = {}
+    if (service_id) where.service_id = service_id
+    if (status) where.status = status
+    
+    const { count, rows } = await DomainBinding.findAndCountAll({
+      where,
+      include: [
+        { model: Service, as: 'service', attributes: ['id', 'name'] },
+        { model: User, as: 'user', attributes: ['id', 'username'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(page_size),
+      offset: (parseInt(page) - 1) * parseInt(page_size)
+    })
+    
+    res.json({
+      code: 200,
+      data: { list: rows, total: count, page: parseInt(page), page_size: parseInt(page_size) }
+    })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取失败' })
+  }
+})
+
+router.put('/domain-bindings/:id', auth, admin, async (req, res) => {
+  try {
+    const { status, ssl_enabled, ssl_cert, ssl_key } = req.body
+    
+    const binding = await DomainBinding.findByPk(req.params.id)
+    
+    if (!binding) {
+      return res.json({ code: 404, message: '绑定不存在' })
+    }
+    
+    await binding.update({
+      status: status || binding.status,
+      ssl_enabled: ssl_enabled !== undefined ? ssl_enabled : binding.ssl_enabled,
+      ssl_cert: ssl_cert !== undefined ? ssl_cert : binding.ssl_cert,
+      ssl_key: ssl_key !== undefined ? ssl_key : binding.ssl_key
+    })
+    
+    res.json({ code: 200, message: '更新成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '更新失败' })
+  }
+})
+
+router.delete('/domain-bindings/:id', auth, admin, async (req, res) => {
+  try {
+    const binding = await DomainBinding.findByPk(req.params.id)
+    
+    if (!binding) {
+      return res.json({ code: 404, message: '绑定不存在' })
+    }
+    
+    await binding.destroy()
+    res.json({ code: 200, message: '删除成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '删除失败' })
+  }
+})
+
+// 端口转发管理
+router.get('/port-forwards', auth, admin, async (req, res) => {
+  try {
+    const { page = 1, page_size = 20, service_id, status } = req.query
+    
+    const where = {}
+    if (service_id) where.service_id = service_id
+    if (status) where.status = status
+    
+    const { count, rows } = await PortForward.findAndCountAll({
+      where,
+      include: [
+        { model: Service, as: 'service', attributes: ['id', 'name'] },
+        { model: User, as: 'user', attributes: ['id', 'username'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(page_size),
+      offset: (parseInt(page) - 1) * parseInt(page_size)
+    })
+    
+    res.json({
+      code: 200,
+      data: { list: rows, total: count, page: parseInt(page), page_size: parseInt(page_size) }
+    })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取失败' })
+  }
+})
+
+router.put('/port-forwards/:id', auth, admin, async (req, res) => {
+  try {
+    const { status } = req.body
+    
+    const forward = await PortForward.findByPk(req.params.id)
+    
+    if (!forward) {
+      return res.json({ code: 404, message: '转发不存在' })
+    }
+    
+    await forward.update({
+      status: status || forward.status
+    })
+    
+    res.json({ code: 200, message: '更新成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '更新失败' })
+  }
+})
+
+router.delete('/port-forwards/:id', auth, admin, async (req, res) => {
+  try {
+    const forward = await PortForward.findByPk(req.params.id)
+    
+    if (!forward) {
+      return res.json({ code: 404, message: '转发不存在' })
+    }
+    
+    await forward.destroy()
+    res.json({ code: 200, message: '删除成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '删除失败' })
+  }
+})
+
+// 充值记录管理
+router.get('/recharges', auth, admin, async (req, res) => {
+  try {
+    const { page = 1, page_size = 20, status } = req.query
+    
+    const where = {}
+    if (status) where.status = status
+    
+    const { count, rows } = await Recharge.findAndCountAll({
+      where,
+      include: [
+        { model: User, as: 'user', attributes: ['id', 'username', 'email'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(page_size),
+      offset: (parseInt(page) - 1) * parseInt(page_size)
+    })
+    
+    res.json({
+      code: 200,
+      data: { list: rows, total: count, page: parseInt(page), page_size: parseInt(page_size) }
+    })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取失败' })
+  }
+})
+
+router.put('/recharges/:id/process', auth, admin, async (req, res) => {
+  try {
+    const recharge = await Recharge.findByPk(req.params.id, {
+      include: [{ model: User, as: 'user' }]
+    })
+    
+    if (!recharge) {
+      return res.json({ code: 404, message: '充值记录不存在' })
+    }
+    
+    if (recharge.status !== 'pending') {
+      return res.json({ code: 400, message: '该充值记录已处理' })
+    }
+    
+    // 更新充值状态
+    await recharge.update({ status: 'completed' })
+    
+    // 更新用户余额
+    const user = recharge.user
+    const oldBalance = user.balance
+    const newBalance = oldBalance + parseFloat(recharge.amount)
+    
+    await user.update({ balance: newBalance })
+    
+    // 创建余额变动日志
+    await BalanceLog.create({
+      user_id: user.id,
+      type: 'recharge',
+      amount: recharge.amount,
+      balance_before: oldBalance,
+      balance_after: newBalance,
+      note: `管理员手动处理充值: ${recharge.trade_no}`
+    })
+    
+    res.json({ code: 200, message: '处理成功，余额已更新' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '处理失败' })
+  }
+})
+
+router.delete('/recharges/:id', auth, admin, async (req, res) => {
+  try {
+    const recharge = await Recharge.findByPk(req.params.id)
+    
+    if (!recharge) {
+      return res.json({ code: 404, message: '充值记录不存在' })
+    }
+    
+    await recharge.destroy()
+    res.json({ code: 200, message: '删除成功' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '删除失败' })
+  }
+})
+
+// 余额变动日志
+router.get('/balance-logs', auth, admin, async (req, res) => {
+  try {
+    const { page = 1, page_size = 20, user_id } = req.query
+    
+    const where = {}
+    if (user_id) where.user_id = user_id
+    
+    const { count, rows } = await BalanceLog.findAndCountAll({
+      where,
+      include: [
+        { model: User, as: 'user', attributes: ['id', 'username', 'email'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(page_size),
+      offset: (parseInt(page) - 1) * parseInt(page_size)
+    })
+    
+    res.json({
+      code: 200,
+      data: { list: rows, total: count, page: parseInt(page), page_size: parseInt(page_size) }
+    })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取失败' })
   }
 })
 

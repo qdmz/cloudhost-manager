@@ -54,8 +54,9 @@ router.post('/:id/start', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
     
-    await service.update({ status: 'running' })
+    await vmService.startVM(service)
     
     res.json({ code: 200, message: '开机成功' })
   } catch (error) {
@@ -71,8 +72,9 @@ router.post('/:id/stop', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
     
-    await service.update({ status: 'stopped' })
+    await vmService.stopVM(service)
     
     res.json({ code: 200, message: '关机成功' })
   } catch (error) {
@@ -88,6 +90,9 @@ router.post('/:id/restart', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
+    
+    await vmService.restartVM(service)
     
     res.json({ code: 200, message: '重启成功' })
   } catch (error) {
@@ -104,9 +109,9 @@ router.post('/:id/reset-password', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
     
-    const hashedPassword = require('bcryptjs').hashSync(password, 10)
-    await service.update({ password: hashedPassword })
+    await vmService.resetPassword(service, password)
     
     res.json({ code: 200, message: '密码重置成功' })
   } catch (error) {
@@ -123,6 +128,9 @@ router.post('/:id/reinstall', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
+    
+    await vmService.reinstallSystem(service, image_id)
     
     res.json({ code: 200, message: '系统重装请求已提交' })
   } catch (error) {
@@ -184,7 +192,19 @@ router.get('/:id/stats', auth, async (req, res) => {
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
     
-    res.json({ code: 200, data: { cpu: 0, memory: 0, disk: 0, network_usage: 'N/A' } })
+    let stats = { cpu: 0, memory: 0, disk: 0, network_usage: '0 GB' }
+    
+    if (service.vmid) {
+      const vmStats = await vmService.getVMStatus(service)
+      stats = {
+        cpu: vmStats.cpu_usage || 0,
+        memory: vmStats.memory_usage || 0,
+        disk: vmStats.disk_usage || 0,
+        network_usage: service.network_usage || '0 GB'
+      }
+    }
+    
+    res.json({ code: 200, data: stats })
   } catch (error) {
     console.error('Get stats error:', error.message)
     res.json({ code: 500, message: '获取失败' })
@@ -198,8 +218,11 @@ router.get('/:id/vnc', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
     
-    res.json({ code: 200, data: { vnc_url: '', token: '' } })
+    const vncData = await vmService.getVNC(service)
+    
+    res.json({ code: 200, data: vncData })
   } catch (error) {
     console.error('Get VNC error:', error.message)
     res.json({ code: 500, message: '获取失败' })
@@ -213,8 +236,11 @@ router.get('/:id/console', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    if (!service.vmid) return res.json({ code: 400, message: '服务没有关联真实虚拟机' })
     
-    res.json({ code: 200, data: { vnc_url: '', token: '' } })
+    const consoleData = await vmService.getConsole(service)
+    
+    res.json({ code: 200, data: consoleData })
   } catch (error) {
     console.error('Get console error:', error.message)
     res.json({ code: 500, message: '获取失败' })

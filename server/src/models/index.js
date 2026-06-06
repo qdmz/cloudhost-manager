@@ -103,7 +103,14 @@ const Node = sequelize.define('Node', {
   cpu_usage: { type: DataTypes.INTEGER, defaultValue: 0 },
   memory_usage: { type: DataTypes.INTEGER, defaultValue: 0 },
   memory_total: { type: DataTypes.INTEGER, defaultValue: 0 },
-  note: { type: DataTypes.TEXT }
+  note: { type: DataTypes.TEXT },
+  // SSH 配置字段
+  ssh_enabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+  ssh_host: { type: DataTypes.STRING(255) },
+  ssh_port: { type: DataTypes.INTEGER, defaultValue: 22 },
+  ssh_username: { type: DataTypes.STRING(100), defaultValue: 'root' },
+  ssh_password: { type: DataTypes.STRING(255) },
+  ssh_key: { type: DataTypes.TEXT }
 }, { tableName: 'nodes', timestamps: true, underscored: true })
 
 const Image = sequelize.define('Image', {
@@ -196,9 +203,39 @@ const AuthRequest = sequelize.define('AuthRequest', {
   reviewed_at: { type: DataTypes.DATE }
 }, { tableName: 'auth_requests', timestamps: true, underscored: true })
 
+const DomainBinding = sequelize.define('DomainBinding', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  service_id: { type: DataTypes.INTEGER, allowNull: false },
+  user_id: { type: DataTypes.INTEGER, allowNull: false },
+  domain: { type: DataTypes.STRING(255), allowNull: false },
+  protocol: { type: DataTypes.ENUM('http', 'https', 'tcp', 'udp'), defaultValue: 'http' },
+  external_port: { type: DataTypes.INTEGER, allowNull: false },
+  internal_ip: { type: DataTypes.STRING(50) },
+  internal_port: { type: DataTypes.INTEGER, allowNull: false },
+  status: { type: DataTypes.ENUM('active', 'inactive', 'pending'), defaultValue: 'pending' },
+  ssl_enabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+  ssl_cert: { type: DataTypes.TEXT },
+  ssl_key: { type: DataTypes.TEXT },
+  note: { type: DataTypes.TEXT }
+}, { tableName: 'domain_bindings', timestamps: true, underscored: true })
+
+const PortForward = sequelize.define('PortForward', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  service_id: { type: DataTypes.INTEGER, allowNull: false },
+  user_id: { type: DataTypes.INTEGER, allowNull: false },
+  protocol: { type: DataTypes.ENUM('tcp', 'udp'), defaultValue: 'tcp' },
+  external_port: { type: DataTypes.INTEGER, allowNull: false },
+  internal_ip: { type: DataTypes.STRING(50) },
+  internal_port: { type: DataTypes.INTEGER, allowNull: false },
+  status: { type: DataTypes.ENUM('active', 'inactive', 'pending'), defaultValue: 'pending' },
+  note: { type: DataTypes.TEXT }
+}, { tableName: 'port_forwards', timestamps: true, underscored: true })
+
 User.hasMany(Service, { foreignKey: 'user_id' })
 Service.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
 Service.belongsTo(Node, { foreignKey: 'node_id', as: 'node' })
+Service.hasMany(DomainBinding, { foreignKey: 'service_id' })
+Service.hasMany(PortForward, { foreignKey: 'service_id' })
 
 Product.hasMany(Plan, { foreignKey: 'product_id' })
 Plan.belongsTo(Product, { foreignKey: 'product_id' })
@@ -224,9 +261,17 @@ Recharge.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
 User.hasMany(BalanceLog, { foreignKey: 'user_id' })
 BalanceLog.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
 
+User.hasMany(DomainBinding, { foreignKey: 'user_id' })
+DomainBinding.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
+DomainBinding.belongsTo(Service, { foreignKey: 'service_id', as: 'service' })
+
+User.hasMany(PortForward, { foreignKey: 'user_id' })
+PortForward.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
+PortForward.belongsTo(Service, { foreignKey: 'service_id', as: 'service' })
+
 module.exports = {
   sequelize,
   User, Service, Product, Plan, Order, Node, Image,
   Ticket, TicketMessage, Announcement, Recharge, Voucher,
-  BalanceLog, Config, AuthRequest
+  BalanceLog, Config, AuthRequest, DomainBinding, PortForward
 }

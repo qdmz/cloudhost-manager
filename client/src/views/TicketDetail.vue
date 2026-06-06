@@ -81,7 +81,14 @@ const fetchTicket = async () => {
   try {
     const res = await getTicket(route.params.id)
     ticket.value = res.data
-    messages.value = res.data?.messages || []
+    // 后端返回的是TicketMessage数组，我们需要确保正确映射
+    const ticketMessages = res.data?.TicketMessages || res.data?.messages || []
+    messages.value = ticketMessages.map(msg => ({
+      ...msg,
+      is_admin: msg.is_admin !== undefined ? msg.is_admin : (msg.user_id !== ticket.value?.user_id)
+    }))
+    console.log('Ticket data:', res.data)
+    console.log('Messages:', messages.value)
   } catch (error) {
     message.error(error.message)
   } finally {

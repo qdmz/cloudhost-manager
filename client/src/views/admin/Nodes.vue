@@ -2,7 +2,7 @@
   <div class="nodes-page">
     <div class="page-header">
       <h2>节点管理</h2>
-      <a-button type="primary" @click="showAddModal = true"><PlusOutlined /> 添加节点</a-button>
+      <a-button type="primary" @click="openAddModal"><PlusOutlined /> 添加节点</a-button>
     </div>
     
     <a-table :columns="columns" :data-source="nodes" :loading="loading" row-key="id">
@@ -12,9 +12,14 @@
             {{ record.status === 'online' ? '在线' : '离线' }}
           </a-tag>
         </template>
+        <template v-else-if="column.key === 'ssh_status'">
+          <a-tag :color="record.ssh_enabled ? 'success' : 'default'">
+            {{ record.ssh_enabled ? '已启用' : '未启用' }}
+          </a-tag>
+        </template>
         <template v-else-if="column.key === 'resources'">
           <a-progress :percent="record.cpu_usage" size="small" />
-          <div class="text-muted">内存: {{ record.memory_usage }}/{{ record.memory_total }}GB</div>
+          <div class="text-muted">内存: {{ record.memory_usage || 0 }}/{{ record.memory_total || 0 }}GB</div>
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
@@ -30,69 +35,130 @@
       </template>
     </a-table>
     
-    <a-modal v-model:open="showAddModal" title="添加节点" width="700px" @ok="handleAdd">
-      <a-form :model="nodeForm" layout="vertical">
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="节点名称" name="name">
-              <a-input v-model:value="nodeForm.name" placeholder="如: 洛杉矶节点1" />
+    <a-modal v-model:open="showAddModal" :title="nodeForm.id ? '编辑节点' : '添加节点'" width="800px" @ok="handleAdd">
+      <a-tabs v-model:activeKey="activeTab">
+        <a-tab-pane key="basic" tab="基础配置">
+          <a-form :model="nodeForm" layout="vertical">
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="节点名称" name="name" :rules="[{ required: true, message: '请输入节点名称' }]">
+                  <a-input v-model:value="nodeForm.name" placeholder="如: 洛杉矶节点1" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="节点类型" name="type" :rules="[{ required: true, message: '请选择节点类型' }]">
+                  <a-select v-model:value="nodeForm.type">
+                    <a-select-option value="pve">Proxmox VE</a-select-option>
+                    <a-select-option value="incus">Incus</a-select-option>
+                    <a-select-option value="lxd">LXD</a-select-option>
+                    <a-select-option value="kvm">KVM</a-select-option>
+                  </a-select>
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item label="节点地址 (PVE Web UI)" name="host" :rules="[{ required: true, message: '请输入节点地址' }]">
+              <a-input v-model:value="nodeForm.host" placeholder="如: https://pve.example.com:8006" />
             </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="节点类型" name="type">
-              <a-select v-model:value="nodeForm.type">
-                <a-select-option value="pve">Proxmox VE</a-select-option>
-                <a-select-option value="incus">Incus</a-select-option>
-                <a-select-option value="lxd">LXD</a-select-option>
-                <a-select-option value="kvm">KVM</a-select-option>
-              </a-select>
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="API用户名" name="api_user">
+                  <a-input v-model:value="nodeForm.api_user" placeholder="如: root@pam" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="API令牌" name="api_token">
+                  <a-input-password v-model:value="nodeForm.api_token" placeholder="PVE API Token" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item label="节点位置" name="location">
+              <a-input v-model:value="nodeForm.location" placeholder="如: 洛杉矶" />
             </a-form-item>
-          </a-col>
-        </a-row>
-        <a-form-item label="节点地址" name="host">
-          <a-input v-model:value="nodeForm.host" placeholder="如: https://pve.example.com:8006" />
-        </a-form-item>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="API用户名" name="api_user">
-              <a-input v-model:value="nodeForm.api_user" placeholder="如: root@pam" />
+          </a-form>
+        </a-tab-pane>
+        
+        <a-tab-pane key="network" tab="网络配置">
+          <a-form :model="nodeForm" layout="vertical">
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="NAT网桥" name="nat_bridge">
+                  <a-input v-model:value="nodeForm.nat_bridge" placeholder="如: vmbr1" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="IPV6网桥" name="ipv6_bridge">
+                  <a-input v-model:value="nodeForm.ipv6_bridge" placeholder="如: vmbr2" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item label="NAT子网" name="nat_subnet">
+              <a-input v-model:value="nodeForm.nat_subnet" placeholder="如: 10.0.1.0/24" />
             </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="API令牌" name="api_token">
-              <a-input-password v-model:value="nodeForm.api_token" placeholder="PVE API Token" />
+            <a-form-item label="IPv6子网" name="ipv6_subnet">
+              <a-input v-model:value="nodeForm.ipv6_subnet" placeholder="如: 2001:db8::/64" />
             </a-form-item>
-          </a-col>
-        </a-row>
-        <a-form-item label="节点位置" name="location">
-          <a-input v-model:value="nodeForm.location" placeholder="如: 洛杉矶" />
-        </a-form-item>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="NAT网桥" name="nat_bridge">
-              <a-input v-model:value="nodeForm.nat_bridge" placeholder="如: vmbr1" />
+          </a-form>
+        </a-tab-pane>
+        
+        <a-tab-pane key="ssh" tab="SSH配置">
+          <a-form :model="nodeForm" layout="vertical">
+            <a-form-item>
+              <a-checkbox v-model:checked="nodeForm.ssh_enabled">启用SSH连接</a-checkbox>
+              <div class="form-help">启用后可进行端口转发、域名绑定等网络配置</div>
             </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="IPV6网桥" name="ipv6_bridge">
-              <a-input v-model:value="nodeForm.ipv6_bridge" placeholder="如: vmbr2" />
+            
+            <template v-if="nodeForm.ssh_enabled">
+              <a-row :gutter="16">
+                <a-col :span="12">
+                  <a-form-item label="SSH地址" name="ssh_host">
+                    <a-input v-model:value="nodeForm.ssh_host" placeholder="留空则使用节点地址" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="SSH端口" name="ssh_port">
+                    <a-input-number v-model:value="nodeForm.ssh_port" :min="1" :max="65535" style="width: 100%" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+              <a-form-item label="SSH用户名" name="ssh_username">
+                <a-input v-model:value="nodeForm.ssh_username" placeholder="如: root" />
+              </a-form-item>
+              <a-row :gutter="16">
+                <a-col :span="12">
+                  <a-form-item label="SSH密码" name="ssh_password">
+                    <a-input-password v-model:value="nodeForm.ssh_password" placeholder="留空则不修改" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="SSH私钥" name="ssh_key">
+                    <a-textarea v-model:value="nodeForm.ssh_key" :rows="3" placeholder="使用私钥认证时填写" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+              <a-form-item>
+                <a-button type="primary" @click="testSshConnection" :loading="sshTesting">
+                  < ThunderboltOutlined /> 测试SSH连接
+                </a-button>
+                <span v-if="sshTestResult" :class="sshTestResult.success ? 'text-success' : 'text-error'" style="margin-left: 12px">
+                  {{ sshTestResult.message }}
+                </span>
+              </a-form-item>
+            </template>
+          </a-form>
+        </a-tab-pane>
+        
+        <a-tab-pane key="note" tab="备注">
+          <a-form :model="nodeForm" layout="vertical">
+            <a-form-item label="备注" name="note">
+              <a-textarea v-model:value="nodeForm.note" :rows="4" placeholder="可选备注信息" />
             </a-form-item>
-          </a-col>
-        </a-row>
-        <a-form-item label="NAT子网" name="nat_subnet">
-          <a-input v-model:value="nodeForm.nat_subnet" placeholder="如: 10.0.1.0/24" />
-        </a-form-item>
-        <a-form-item label="IPv6子网" name="ipv6_subnet">
-          <a-input v-model:value="nodeForm.ipv6_subnet" placeholder="如: 2001:db8::/64" />
-        </a-form-item>
-        <a-form-item label="备注" name="note">
-          <a-textarea v-model:value="nodeForm.note" :rows="2" />
-        </a-form-item>
-      </a-form>
+          </a-form>
+        </a-tab-pane>
+      </a-tabs>
     </a-modal>
     
     <a-modal v-model:open="showImagesModal" title="管理镜像" width="800px">
-      <a-button type="primary" size="small" @click="showAddImageModal = true" style="margin-bottom: 16px">
+      <a-button type="primary" size="small" @click="openAddImageModal" style="margin-bottom: 16px">
         <PlusOutlined /> 添加镜像
       </a-button>
       <a-table :columns="imageColumns" :data-source="images" size="small" row-key="id">
@@ -155,7 +221,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getNodes, createNode, updateNode, deleteNode as apiDeleteNode, syncNode as apiSyncNode, syncNodeImages as apiSyncNodeImages, getImages, createImage, updateImage, deleteImage as apiDeleteImage } from '@/api/admin'
+import { getNodes, createNode, updateNode, deleteNode as apiDeleteNode, syncNode as apiSyncNode, syncNodeImages as apiSyncNodeImages, getImages, createImage, updateImage, deleteImage as apiDeleteImage, testSshConnection as apiTestSsh } from '@/api/admin'
 import { message } from 'ant-design-vue'
 
 const loading = ref(false)
@@ -165,11 +231,15 @@ const showImagesModal = ref(false)
 const showAddImageModal = ref(false)
 const currentNode = ref(null)
 const images = ref([])
+const activeTab = ref('basic')
+const sshTesting = ref(false)
+const sshTestResult = ref(null)
 
 const nodeForm = ref({
   id: null, name: '', type: 'pve', host: '', api_user: '', api_token: '',
   location: '', nat_bridge: 'vmbr1', ipv6_bridge: 'vmbr2',
-  nat_subnet: '', ipv6_subnet: '', note: ''
+  nat_subnet: '', ipv6_subnet: '', note: '',
+  ssh_enabled: false, ssh_host: '', ssh_port: 22, ssh_username: 'root', ssh_password: '', ssh_key: ''
 })
 
 const imageForm = ref({ id: null, node_id: null, name: '', os: '', version: '', arch: 'amd64', template: '' })
@@ -180,6 +250,7 @@ const columns = [
   { title: '类型', dataIndex: 'type' },
   { title: '位置', dataIndex: 'location' },
   { title: '状态', key: 'status' },
+  { title: 'SSH', key: 'ssh_status', width: 100 },
   { title: '资源使用', key: 'resources' },
   { title: '操作', key: 'action', width: 280 }
 ]
@@ -204,25 +275,82 @@ const fetchNodes = async () => {
   }
 }
 
+const openAddModal = () => {
+  nodeForm.value = {
+    id: null, name: '', type: 'pve', host: '', api_user: '', api_token: '',
+    location: '', nat_bridge: 'vmbr1', ipv6_bridge: 'vmbr2',
+    nat_subnet: '', ipv6_subnet: '', note: '',
+    ssh_enabled: false, ssh_host: '', ssh_port: 22, ssh_username: 'root', ssh_password: '', ssh_key: ''
+  }
+  activeTab.value = 'basic'
+  sshTestResult.value = null
+  showAddModal.value = true
+}
+
 const handleAdd = async () => {
   try {
+    if (!nodeForm.value.name || !nodeForm.value.host) {
+      message.warning('请填写必填项')
+      return
+    }
+    
+    // 清理空密码
+    const submitData = { ...nodeForm.value }
+    if (!submitData.ssh_password) {
+      delete submitData.ssh_password
+    }
+    if (!submitData.ssh_key) {
+      delete submitData.ssh_key
+    }
+    
     if (nodeForm.value.id) {
-      await updateNode(nodeForm.value.id, nodeForm.value)
+      await updateNode(nodeForm.value.id, submitData)
       message.success('更新成功')
     } else {
-      await createNode(nodeForm.value)
+      await createNode(submitData)
       message.success('添加成功')
     }
     showAddModal.value = false
     fetchNodes()
   } catch (error) {
-    message.error(error.message)
+    message.error(error.message || '操作失败')
   }
 }
 
 const editNode = (node) => {
-  nodeForm.value = { ...node }
+  nodeForm.value = { 
+    ...node,
+    ssh_password: '', // 不显示原密码
+    ssh_key: node.ssh_key || ''
+  }
+  activeTab.value = 'basic'
+  sshTestResult.value = null
   showAddModal.value = true
+}
+
+const testSshConnection = async () => {
+  if (!nodeForm.value.id) {
+    message.warning('请先保存节点后再测试SSH连接')
+    return
+  }
+  
+  sshTesting.value = true
+  sshTestResult.value = null
+  
+  try {
+    const res = await apiTestSsh(nodeForm.value.id)
+    sshTestResult.value = res.data || res
+    if (res.data?.success) {
+      message.success('SSH连接成功')
+    } else {
+      message.error(res.data?.message || 'SSH连接失败')
+    }
+  } catch (error) {
+    sshTestResult.value = { success: false, message: error.message || 'SSH连接失败' }
+    message.error(error.message || 'SSH连接失败')
+  } finally {
+    sshTesting.value = false
+  }
 }
 
 const syncNode = async (node) => {
@@ -261,6 +389,11 @@ const manageImages = async (node) => {
   }
 }
 
+const openAddImageModal = () => {
+  imageForm.value = { id: null, node_id: currentNode.value.id, name: '', os: '', version: '', arch: 'amd64', template: '' }
+  showAddImageModal.value = true
+}
+
 const editImage = (image) => {
   imageForm.value = { ...image }
   showAddImageModal.value = true
@@ -268,7 +401,6 @@ const editImage = (image) => {
 
 const handleAddImage = async () => {
   try {
-    imageForm.value.node_id = currentNode.value.id
     if (imageForm.value.id) {
       await updateImage(imageForm.value.id, imageForm.value)
       message.success('更新成功')
@@ -307,3 +439,35 @@ onMounted(() => {
   fetchNodes()
 })
 </script>
+
+<style lang="scss" scoped>
+.nodes-page {
+  padding: 20px;
+  
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+}
+
+.text-muted {
+  color: #999;
+  font-size: 12px;
+}
+
+.form-help {
+  color: #999;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.text-success {
+  color: #52c41a;
+}
+
+.text-error {
+  color: #f5222d;
+}
+</style>
