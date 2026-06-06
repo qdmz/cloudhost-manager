@@ -79,7 +79,7 @@
               </template>
             </a-dropdown>
             <a-button size="small" type="primary" @click="showRestoreModal(record)" :loading="restoring === record.name">
-              <RestoreOutlined /> 恢复
+              <SyncOutlined /> 恢复
             </a-button>
             <a-popconfirm 
               title="确定删除此备份吗？此操作不可恢复。" 
@@ -143,7 +143,7 @@ import {
   PlusOutlined, 
   ReloadOutlined, 
   DownloadOutlined, 
-  RestoreOutlined, 
+  SyncOutlined, 
   DeleteOutlined,
   DownOutlined,
   DatabaseOutlined,
