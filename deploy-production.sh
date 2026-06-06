@@ -163,18 +163,20 @@ start_services() {
     log_info "启动后端服务..."
     cd "$SCRIPT_DIR/server"
     
+    # 停止旧的 cloudhost 进程（如果有）
+    pm2 delete cloudhost 2>/dev/null || true
+    
     # 使用 PM2 启动
     pm2 start src/app.js --name cloudhost-server --env production
     pm2 save
     
     log_success "后端服务已启动"
     
-    # 设置开机自启
-    if ! pm2 startup | grep -q "already configured"; then
-        log_info "配置 PM2 开机自启..."
-        pm2 startup | tail -n 1 | bash
-        pm2 save
-    fi
+    # 设置开机自启（跳过自动配置，手动提示）
+    log_info "提示：如需配置开机自启，请手动执行:"
+    log_info "  pm2 startup"
+    log_info "  # 然后复制粘贴输出的命令执行"
+    log_info "  pm2 save"
 }
 
 # 配置 Nginx (HTTP)
