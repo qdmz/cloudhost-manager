@@ -148,7 +148,7 @@ const handleVoucher = async () => {
   
   voucherLoading.value = true
   try {
-    await getVouchers({ code: voucherCode.value })
+    await useVoucher(voucherCode.value)
     message.success('代金券兑换成功')
     voucherCode.value = ''
     userStore.fetchUserInfo()

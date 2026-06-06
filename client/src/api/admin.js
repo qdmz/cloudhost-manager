@@ -16,6 +16,7 @@ export const cancelOrder = (id) => request.post(`/admin/orders/${id}/cancel`)
 export const getTickets = (params) => request.get('/admin/tickets', { params })
 export const getTicket = (id) => request.get(`/admin/tickets/${id}`)
 export const replyTicket = (id, data) => request.post(`/admin/tickets/${id}/reply`, data)
+export const closeTicket = (id) => request.post(`/admin/tickets/${id}/close`)
 
 export const getProducts = (params) => request.get('/admin/products', { params })
 export const getProduct = (id) => request.get(`/admin/products/${id}`)

@@ -216,6 +216,7 @@ User.hasMany(Ticket, { foreignKey: 'user_id' })
 Ticket.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
 Ticket.hasMany(TicketMessage, { foreignKey: 'ticket_id' })
 TicketMessage.belongsTo(Ticket, { foreignKey: 'ticket_id' })
+TicketMessage.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
 
 User.hasMany(Recharge, { foreignKey: 'user_id' })
 Recharge.belongsTo(User, { foreignKey: 'user_id', as: 'user' })

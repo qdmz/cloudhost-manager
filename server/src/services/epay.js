@@ -17,10 +17,16 @@ class EpayService {
      */
     async getConfig() {
         const configs = await getConfigs();
+        console.log('[Epay] All configs:', Object.keys(configs));
+        
+        const epayKey = configs.epay_key || process.env.EPAY_KEY;
+        console.log('[Epay] epay_key from configs:', configs.epay_key ? 'found' : 'not found');
+        console.log('[Epay] epay_key from env:', process.env.EPAY_KEY ? 'found' : 'not found');
+        
         return {
             epayUrl: configs.epay_url || process.env.EPAY_URL,
             epayPid: configs.epay_pid || process.env.EPAY_PID,
-            epayKey: configs.epay_key || process.env.EPAY_KEY,
+            epayKey: epayKey,
             epayPrivateKey: configs.epay_private_key || process.env.EPAY_PRIVATE_KEY,
             epayPublicKey: configs.epay_public_key || process.env.EPAY_PUBLIC_KEY,
             siteUrl: configs.site_url || process.env.SITE_URL,
