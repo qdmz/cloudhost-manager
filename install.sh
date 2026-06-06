@@ -3,6 +3,10 @@
 # CloudHost 一键安装脚本
 # 支持 Ubuntu/Debian/CentOS
 
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 set -e
 
 # 颜色定义
@@ -92,70 +96,100 @@ install_mysql() {
 # 创建数据库
 create_database() {
     log_info "创建数据库..."
-
-    # 读取 .env 配置
-    local db_host=""
-    local db_port=""
-    local db_name=""
-    local db_user=""
-    local db_pass=""
-
+    
+    # 默认数据库配置
+    local DB_NAME="cloudhost"
+    local DB_USER="root"
+    local DB_PASS=""
+    local DB_HOST="localhost"
+    local DB_PORT="3306"
+    
+    # 从 .env 读取配置
     if [ -f ".env" ]; then
-        db_host=$(grep -E '^DB_HOST=' .env | cut -d '=' -f 2 | tr -d '"')
-        db_port=$(grep -E '^DB_PORT=' .env | cut -d '=' -f 2 | tr -d '"')
-        db_name=$(grep -E '^DB_NAME=' .env | cut -d '=' -f 2 | tr -d '"')
-        db_user=$(grep -E '^DB_USER=' .env | cut -d '=' -f 2 | tr -d '"')
-        db_pass=$(grep -E '^DB_PASS=' .env | cut -d '=' -f 2 | tr -d '"')
+        while IFS='=' read -r key value; do
+            # 去除首尾空格和引号
+            key=$(echo "$key" | xargs)
+            value=$(echo "$value" | xargs | sed 's/^["'"'"']//;s/["'"'"']$//')
+            
+            case "$key" in
+                "DB_NAME") DB_NAME="$value" ;;
+                "DB_USER") DB_USER="$value" ;;
+                "DB_PASS") DB_PASS="$value" ;;
+                "DB_HOST") DB_HOST="$value" ;;
+                "DB_PORT") DB_PORT="$value" ;;
+            esac
+        done < .env
     fi
 
-    # 默认值
-    db_host=${db_host:-localhost}
-    db_port=${db_port:-3306}
-    db_name=${db_name:-cloudhost}
-    db_user=${db_user:-root}
+    log_info "数据库配置: host=$DB_HOST, port=$DB_PORT, database=$DB_NAME, user=$DB_USER"
     
     # 创建数据库
-    if [[ -n "$db_pass" ]]; then
-        mysql -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" 2>/dev/null -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
-            log_warn "无法自动创建数据库，请手动创建"
-            log_info "执行: CREATE DATABASE \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-        }
-    else
-        mysql -h "$db_host" -P "$db_port" -u "$db_user" 2>/dev/null -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
-            log_warn "无法自动创建数据库，请手动创建"
-            log_info "执行: CREATE DATABASE \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-        }
+    local mysql_cmd="mysql"
+    if [ "$DB_HOST" != "localhost" ]; then
+        mysql_cmd="$mysql_cmd -h $DB_HOST"
     fi
-
-    log_info "数据库 $db_name 准备完成"
+    mysql_cmd="$mysql_cmd -P $DB_PORT -u $DB_USER"
+    
+    if [ -n "$DB_PASS" ]; then
+        mysql_cmd="$mysql_cmd -p\"$DB_PASS\""
+    fi
+    
+    log_info "正在创建数据库..."
+    $mysql_cmd -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+    
+    if [ $? -eq 0 ]; then
+        log_info "数据库 $DB_NAME 创建成功"
+    else
+        log_warn "无法自动创建数据库，请手动执行以下命令："
+        echo ""
+        echo "  mysql -u root -p"
+        echo "  CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        echo "  EXIT;"
+        echo ""
+    fi
 }
 
 # 安装前端依赖
 install_client_deps() {
     log_info "安装前端依赖..."
-    cd client
-    npm install
-    cd ..
-    log_info "前端依赖安装完成"
+    if [ -d "client" ]; then
+        cd client
+        npm install
+        cd ..
+        log_info "前端依赖安装完成"
+    else
+        log_error "找不到 client 目录"
+    fi
 }
 
 # 安装后端依赖
 install_server_deps() {
     log_info "安装后端依赖..."
-    cd server
-    npm install
-    log_info "后端依赖安装完成"
+    if [ -d "server" ]; then
+        cd server
+        npm install
+        cd ..
+        log_info "后端依赖安装完成"
+    else
+        log_error "找不到 server 目录"
+    fi
 }
 
 # 初始化数据库
 init_database() {
     log_info "初始化数据库..."
-    cd server
-    node src/init-db.js || {
-        log_warn "数据库初始化可能遇到问题，请检查配置"
-    }
-    cd ..
-    log_info "数据库初始化完成"
+    if [ -d "server" ]; then
+        cd server
+        if [ -f "src/init-db.js" ]; then
+            node src/init-db.js
+            log_info "数据库初始化完成"
+        else
+            log_error "找不到 init-db.js"
+        fi
+        cd ..
+    else
+        log_error "找不到 server 目录"
+    fi
 }
 
 # 配置环境变量
@@ -174,12 +208,13 @@ setup_env() {
         if [ -n "$env_example" ]; then
             cp "$env_example" .env
             log_warn "请编辑 .env 文件配置数据库和API密钥"
+            log_info "配置文件位置: $SCRIPT_DIR/.env"
         else
             log_error "找不到 .env.example 配置模板"
             exit 1
         fi
     else
-        log_info ".env 文件已存在"
+        log_info ".env 配置文件已存在"
     fi
 }
 
@@ -188,6 +223,8 @@ main() {
     echo "========================================"
     echo "   CloudHost 云主机管理平台一键安装"
     echo "========================================"
+    echo ""
+    echo "当前目录: $(pwd)"
     echo ""
 
     check_root
@@ -222,8 +259,8 @@ main() {
     echo "========================================"
     echo ""
     echo "启动服务命令："
-    echo "  后端: cd server && npm start"
-    echo "  前端: cd client && npm run dev"
+    echo "  后端: cd $SCRIPT_DIR/server && npm start"
+    echo "  前端: cd $SCRIPT_DIR/client && npm run dev"
     echo ""
     echo "默认账号："
     echo "  管理后台: admin / admin123"
