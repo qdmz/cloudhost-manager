@@ -63,11 +63,20 @@
           <a-form-item label="商户ID" name="epay_pid">
             <a-input v-model:value="epayForm.epay_pid" />
           </a-form-item>
+          <a-form-item label="商户密钥" name="epay_key">
+            <a-input-password v-model:value="epayForm.epay_key" placeholder="MD5密钥（建议使用）" />
+          </a-form-item>
+          <a-form-item label="签名方式" name="epay_sign_type">
+            <a-select v-model:value="epayForm.epay_sign_type">
+              <a-select-option value="MD5">MD5</a-select-option>
+              <a-select-option value="RSA">RSA</a-select-option>
+            </a-select>
+          </a-form-item>
           <a-form-item label="商户私钥" name="epay_private_key">
-            <a-textarea v-model:value="epayForm.epay_private_key" :rows="5" placeholder="RSA 私钥" />
+            <a-textarea v-model:value="epayForm.epay_private_key" :rows="5" placeholder="RSA 私钥（RSA签名时使用）" />
           </a-form-item>
           <a-form-item label="平台公钥" name="epay_public_key">
-            <a-textarea v-model:value="epayForm.epay_public_key" :rows="5" placeholder="RSA 公钥" />
+            <a-textarea v-model:value="epayForm.epay_public_key" :rows="5" placeholder="RSA 公钥（RSA验签时使用）" />
           </a-form-item>
           <a-form-item>
             <a-button type="primary" @click="saveConfig('epay')">保存</a-button>
@@ -104,7 +113,7 @@ const activeTab = ref('basic')
 
 const basicForm = ref({ site_name: 'CloudHost', site_title: '云主机管理平台', site_description: '', site_keywords: '', site_logo: '', site_url: '' })
 const smtpForm = ref({ smtp_host: '', smtp_port: 465, smtp_user: '', smtp_pass: '', smtp_from: '', smtp_secure: true })
-const epayForm = ref({ epay_url: '', epay_pid: '', epay_private_key: '', epay_public_key: '' })
+const epayForm = ref({ epay_url: '', epay_pid: '', epay_key: '', epay_sign_type: 'MD5', epay_private_key: '', epay_public_key: '' })
 const authForm = ref({ auth_enabled: false, auth_api: '', auth_key: '' })
 
 const fetchConfigs = async () => {
@@ -131,6 +140,8 @@ const fetchConfigs = async () => {
     Object.assign(epayForm.value, {
       epay_url: configs.epay_url || '',
       epay_pid: configs.epay_pid || '',
+      epay_key: configs.epay_key || '',
+      epay_sign_type: configs.epay_sign_type || 'MD5',
       epay_private_key: configs.epay_private_key || '',
       epay_public_key: configs.epay_public_key || ''
     })
