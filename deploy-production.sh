@@ -81,6 +81,17 @@ install_dependencies() {
         fi
     fi
     log_success "Nginx 已安装"
+    
+    # 检查 Certbot
+    if ! command -v certbot &> /dev/null; then
+        log_warning "Certbot 未安装，正在安装..."
+        if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
+            apt-get install -y certbot python3-certbot-nginx
+        elif [ "$OS" = "centos" ] || [ "$OS" = "rhel" ]; then
+            yum install -y certbot python3-certbot-nginx
+        fi
+    fi
+    log_success "Certbot 已安装"
 }
 
 # 配置项目
@@ -166,9 +177,9 @@ start_services() {
     fi
 }
 
-# 配置 Nginx
-configure_nginx() {
-    log_info "配置 Nginx..."
+# 配置 Nginx (HTTP)
+configure_nginx_http() {
+    log_info "配置 Nginx (HTTP)..."
     
     # 获取域名或IP
     DOMAIN=""
@@ -236,18 +247,92 @@ EOF
     
     # 测试 Nginx 配置
     nginx -t && systemctl reload nginx
-    log_success "Nginx 配置完成"
+    log_success "Nginx 配置完成 (HTTP)"
+    
+    return 0
+}
+
+# 配置 HTTPS
+setup_https() {
+    log_info "配置 HTTPS..."
+    
+    # 获取域名
+    DOMAIN=""
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        DOMAIN=$(grep 'SITE_DOMAIN' "$SCRIPT_DIR/.env" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+    fi
+    
+    if [ -z "$DOMAIN" ]; then
+        log_warning "未配置域名，跳过 HTTPS 设置"
+        return 0
+    fi
+    
+    # 检查是否为 IP 地址
+    if [[ "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        log_warning "检测到 IP 地址，Let's Encrypt 不支持 IP 证书，跳过 HTTPS 设置"
+        return 0
+    fi
+    
+    log_info "准备为域名 $DOMAIN 申请 Let's Encrypt 证书..."
+    
+    # 询问是否申请证书
+    read -p "是否申请免费 HTTPS 证书？(y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "跳过 HTTPS 设置"
+        return 0
+    fi
+    
+    # 询问邮箱
+    read -p "请输入用于接收证书通知的邮箱: " EMAIL
+    
+    # 使用 certbot 申请证书
+    log_info "申请 Let's Encrypt 证书..."
+    if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$EMAIL" --redirect; then
+        log_success "HTTPS 证书申请成功！"
+        
+        # 配置自动续期
+        log_info "配置证书自动续期..."
+        if ! crontab -l | grep -q "certbot renew"; then
+            (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+            log_success "证书自动续期已配置 (每天凌晨3点检查续期)"
+        fi
+    else
+        log_warning "HTTPS 证书申请失败，请稍后手动执行: certbot --nginx -d $DOMAIN"
+    fi
 }
 
 # 显示访问信息
 show_access_info() {
+    # 获取域名
+    DOMAIN=""
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        DOMAIN=$(grep 'SITE_DOMAIN' "$SCRIPT_DIR/.env" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+    fi
+    
+    if [ -z "$DOMAIN" ]; then
+        DOMAIN=$(hostname -I | awk '{print $1}')
+    fi
+    
+    # 检查是否有 HTTPS
+    HAS_HTTPS=0
+    if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+        HAS_HTTPS=1
+    fi
+    
     echo ""
     echo "========================================"
     log_success "部署完成！"
     echo ""
     log_info "访问信息："
-    echo "  网站地址: http://$DOMAIN"
-    echo "  后台地址: http://$DOMAIN/admin"
+    if [ $HAS_HTTPS -eq 1 ]; then
+        echo "  网站地址: https://$DOMAIN"
+        echo "  后台地址: https://$DOMAIN/admin"
+        echo "  (HTTP 会自动重定向到 HTTPS)"
+    else
+        echo "  网站地址: http://$DOMAIN"
+        echo "  后台地址: http://$DOMAIN/admin"
+    fi
     echo "  管理员: admin / admin123"
     echo ""
     log_info "服务管理命令："
@@ -259,6 +344,10 @@ show_access_info() {
     log_info "Nginx 管理："
     echo "  systemctl status nginx      # 查看状态"
     echo "  systemctl reload nginx      # 重载配置"
+    echo ""
+    log_info "证书管理："
+    echo "  certbot renew --dry-run     # 测试续期"
+    echo "  certbot renew               # 手动续期"
     echo ""
     echo "========================================"
 }
@@ -288,7 +377,8 @@ main() {
     build_frontend
     stop_old_services
     start_services
-    configure_nginx
+    configure_nginx_http
+    setup_https
     show_access_info
 }
 
