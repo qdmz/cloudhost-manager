@@ -154,23 +154,32 @@ router.post('/:id/renew', auth, async (req, res) => {
     if (cycle === 'quarterly') days = 90
     if (cycle === 'yearly') days = 365
     
-    const price = service.price * (days / 30)
+    const servicePrice = parseFloat(service.price)
+    const price = servicePrice * (days / 30)
     
-    if (user.balance < price) {
+    if (isNaN(price) || price <= 0) {
+      return res.json({ code: 400, message: '续费价格无效' })
+    }
+    
+    const userBalance = parseFloat(user.balance)
+    if (userBalance < price) {
       return res.json({ code: 400, message: '余额不足' })
     }
     
-    await user.update({ balance: user.balance - price })
+    const newBalance = userBalance - price
     
-    await BalanceLog.create({
-      user_id: req.userId,
-      type: 'consume',
-      amount: -price,
-      balance_before: user.balance,
-      balance_after: user.balance - price,
-      note: `续费服务 ${service.name}`,
-      related_id: service.id,
-      related_type: 'service'
+    await user.sequelize.transaction(async (t) => {
+      await user.update({ balance: newBalance }, { transaction: t })
+      await BalanceLog.create({
+        user_id: req.userId,
+        type: 'consume',
+        amount: -price,
+        balance_before: userBalance,
+        balance_after: newBalance,
+        note: '续费服务 ' + service.name,
+        related_id: service.id,
+        related_type: 'service'
+      }, { transaction: t })
     })
     
     const newExpireTime = new Date(service.expire_time)

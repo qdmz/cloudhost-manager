@@ -137,7 +137,7 @@
               </a-row>
               <a-form-item>
                 <a-button type="primary" @click="testSshConnection" :loading="sshTesting">
-                  < ThunderboltOutlined /> 测试SSH连接
+                  <ThunderboltOutlined /> 测试SSH连接
                 </a-button>
                 <span v-if="sshTestResult" :class="sshTestResult.success ? 'text-success' : 'text-error'" style="margin-left: 12px">
                   {{ sshTestResult.message }}

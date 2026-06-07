@@ -15,6 +15,23 @@
               <template #prefix><MailOutlined /></template>
             </a-input>
           </a-form-item>
+          <a-form-item label="验证码" name="captcha_code" :rules="[{ required: true, message: '请输入验证码' }]">
+            <div class="captcha-row">
+              <a-input
+                v-model:value="step1Form.captcha_code"
+                size="large"
+                placeholder="请输入验证码"
+                style="flex: 1"
+              />
+              <img
+                :src="captchaImage"
+                alt="验证码"
+                class="captcha-img"
+                @click="refreshCaptcha"
+                title="点击刷新"
+              />
+            </div>
+          </a-form-item>
           <a-form-item>
             <a-button type="primary" html-type="submit" size="large" block :loading="loading">发送验证邮件</a-button>
           </a-form-item>
@@ -46,7 +63,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { message } from 'ant-design-vue'
@@ -55,17 +72,53 @@ import { MailOutlined } from '@ant-design/icons-vue'
 const router = useRouter()
 const currentStep = ref(0)
 const loading = ref(false)
-const step1Form = ref({ email: '' })
+const captchaImage = ref('')
+const step1Form = ref({ email: '', captcha_code: '', captcha_key: '' })
 const step2Form = ref({ code: '', password: '', confirm_password: '' })
 
+const fetchCaptcha = async () => {
+  try {
+    const res = await request.get('/captcha', {
+      responseType: 'blob'
+    })
+    step1Form.value.captcha_key = res.headers?.['x-captcha-key'] || ''
+    const blob = res.data
+    captchaImage.value = URL.createObjectURL(blob)
+  } catch (error) {
+    console.error('获取验证码失败', error)
+  }
+}
+
+const refreshCaptcha = () => {
+  step1Form.value.captcha_code = ''
+  if (captchaImage.value) {
+    URL.revokeObjectURL(captchaImage.value)
+  }
+  fetchCaptcha()
+}
+
+onMounted(() => {
+  fetchCaptcha()
+})
+
 const handleVerify = async () => {
+  if (!step1Form.value.captcha_code || !step1Form.value.captcha_key) {
+    message.error('请完成验证码')
+    refreshCaptcha()
+    return
+  }
   loading.value = true
   try {
-    await request.post('/auth/forgot-password', step1Form.value)
+    await request.post('/auth/forgot-password', {
+      email: step1Form.value.email,
+      captcha_code: step1Form.value.captcha_code,
+      captcha_key: step1Form.value.captcha_key
+    })
     message.success('验证邮件已发送')
     currentStep.value = 1
   } catch (error) {
     message.error(error.message)
+    refreshCaptcha()
   } finally {
     loading.value = false
   }
@@ -120,6 +173,21 @@ const handleReset = async () => {
     
     .step-content {
       min-height: 200px;
+    }
+    
+    .captcha-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      
+      .captcha-img {
+        width: 110px;
+        height: 48px;
+        cursor: pointer;
+        border-radius: 4px;
+        border: 1px solid #e8e8e8;
+        flex-shrink: 0;
+      }
     }
   }
 }

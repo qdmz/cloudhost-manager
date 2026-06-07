@@ -494,27 +494,6 @@ router.get('/tickets', auth, admin, async (req, res) => {
   }
 })
 
-router.get('/tickets/:id', auth, admin, async (req, res) => {
-  try {
-    const ticket = await Ticket.findOne({
-      where: { id: req.params.id },
-      include: [
-        { model: User, as: 'user', attributes: ['username', 'email'] },
-        {
-          model: TicketMessage,
-          include: [{ model: User, as: 'user', attributes: ['username'] }]
-        }
-      ]
-    })
-    
-    if (!ticket) return res.json({ code: 404, message: '工单不存在' })
-    
-    res.json({ code: 200, data: ticket })
-  } catch (error) {
-    console.error(error)
-    res.json({ code: 500, message: '获取失败' })
-  }
-})
 
 router.post('/tickets/:id/reply', auth, admin, async (req, res) => {
   try {
@@ -534,6 +513,28 @@ router.post('/tickets/:id/reply', auth, admin, async (req, res) => {
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: '回复失败' })
+  }
+})
+
+router.get('/tickets/:id', auth, admin, async (req, res) => {
+  try {
+    const ticket = await Ticket.findOne({
+      where: { id: req.params.id },
+      include: [
+        { model: User, as: 'user', attributes: ['username', 'email'] },
+        {
+          model: TicketMessage,
+          include: [{ model: User, as: 'user', attributes: ['username'] }],
+          order: [['created_at', 'ASC']]
+        }
+      ]
+    })
+    if (!ticket) return res.json({ code: 404, message: '工单不存在' })
+    const ticketData = ticket.toJSON()
+    res.json({ code: 200, data: ticketData })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取失败' })
   }
 })
 
@@ -907,6 +908,97 @@ router.put('/configs', auth, admin, async (req, res) => {
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: '保存失败' })
+  }
+})
+
+// 更新单个配置项
+router.put("/configs/update-single", auth, admin, async (req, res) => {
+  try {
+    const { key, value, type } = req.body
+    if (!key) {
+      return res.json({ code: 400, message: "缺少配置键" })
+    }
+    let strValue
+    if (typeof value === "boolean") {
+      strValue = value ? "true" : "false"
+    } else if (value === null || value === undefined) {
+      strValue = ""
+    } else {
+      strValue = String(value)
+    }
+    const configType = type || "string"
+    const existing = await Config.findOne({ where: { key } })
+    if (existing) {
+      await existing.update({ value: strValue, type: configType })
+    } else {
+      await Config.create({ key, value: strValue, type: configType })
+    }
+    const { clearCache } = require("../services/config")
+    clearCache()
+    const smtpKeys = ["smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_secure", "smtp_from"]
+    const hasSmtpChange = smtpKeys.includes(key)
+    if (hasSmtpChange) {
+      const { initTransporter } = require("../services/email")
+      await initTransporter()
+    }
+    res.json({ code: 200, message: "保存成功" })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: "保存失败" })
+  }
+})
+
+// 测试邮件发送
+router.post("/configs/test-template-email", auth, admin, async (req, res) => {
+  try {
+    const { to, template_name, variables } = req.body
+    if (!to) {
+      return res.json({ code: 400, message: "请提供收件人邮箱" })
+    }
+    if (!template_name) {
+      return res.json({ code: 400, message: "请提供模板名称" })
+    }
+    const { sendTemplateEmail, initTransporter, emailTemplates } = require("../services/email")
+    await initTransporter()
+    
+    if (!emailTemplates[template_name]) {
+      return res.json({ code: 400, message: "模板不存在" })
+    }
+    
+    const result = await sendTemplateEmail(to, template_name, { site_name: "CloudHost", ...variables })
+    if (result) {
+      res.json({ code: 200, message: "模板邮件发送成功" })
+    } else {
+      res.json({ code: 500, message: "模板邮件发送失败" })
+    }
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: "发送失败: " + error.message })
+  }
+})
+
+router.post("/configs/test-email", auth, admin, async (req, res) => {
+  try {
+    const { to } = req.body
+    if (!to) {
+      return res.json({ code: 400, message: "请提供收件人邮箱" })
+    }
+    const { sendEmail, initTransporter } = require("../services/email")
+    await initTransporter()
+    const result = await sendEmail(
+      to,
+      "CloudHost 测试邮件",
+      "这是一封测试邮件，如果您收到了，说明邮件服务配置正确。",
+      "<h1>测试邮件</h1><p>如果您看到这封邮件，说明邮件服务配置正确。</p>"
+    )
+    if (result) {
+      res.json({ code: 200, message: "邮件发送成功" })
+    } else {
+      res.json({ code: 500, message: "邮件发送失败" })
+    }
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: "发送失败: " + error.message })
   }
 })
 

@@ -102,7 +102,7 @@ const fetchTicket = async () => {
   try {
     const res = await getTicket(route.params.id)
     ticket.value = res.data
-    messages.value = res.data?.ticket_messages || []
+    messages.value = res.data?.TicketMessages || []
   } catch (error) {
     message.error(error.message)
   } finally {

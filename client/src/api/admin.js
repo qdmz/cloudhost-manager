@@ -85,9 +85,13 @@ export const deleteRecharge = (id) => request.delete(`/admin/recharges/${id}`)
 export const getBalanceLogs = (params) => request.get('/admin/balance-logs', { params })
 
 // 备份管理
+export const updateConfigSingle = (key, value) => request.put('/admin/configs/update-single', { key, value })
+
 export const getBackups = () => request.get('/admin/backups')
 export const createBackup = () => request.post('/admin/backups/create')
 export const restoreBackup = (name, data) => request.post(`/admin/backups/${name}/restore`, data)
+export const testTemplateEmail = (data) => request.post('/admin/configs/test-template-email', data)
+
 export const deleteBackup = (name) => request.delete(`/admin/backups/${name}`)
 
 export const getDashboardStats = () => request.get('/admin/dashboard/stats')

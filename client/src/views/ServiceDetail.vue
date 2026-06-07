@@ -153,6 +153,13 @@
             <a-radio value="yearly">1年</a-radio>
           </a-radio-group>
         </a-form-item>
+        <a-form-item label="支付方式">
+          <a-radio-group v-model:value="renewForm.payment_method">
+            <a-radio value="balance">余额支付</a-radio>
+            <a-radio value="alipay">支付宝</a-radio>
+            <a-radio value="wechat">微信支付</a-radio>
+          </a-radio-group>
+        </a-form-item>
         <div class="renew-summary">
           <p>续费费用：<strong>¥{{ renewPrice }}</strong></p>
           <p>到期时间将延长至：<strong>{{ newExpireDate }}</strong></p>
@@ -198,7 +205,7 @@ const images = ref([])
 
 const passwordForm = ref({ password: '', confirm_password: '' })
 const reinstallForm = ref({ image_id: null })
-const renewForm = ref({ cycle: 'monthly' })
+const renewForm = ref({ cycle: 'monthly', payment_method: 'balance' })
 
 const isExpiringSoon = computed(() => {
   if (!service.value) return false

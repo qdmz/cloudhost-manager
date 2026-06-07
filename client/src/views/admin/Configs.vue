@@ -50,7 +50,10 @@
             <a-switch v-model:checked="smtpForm.smtp_secure" />
           </a-form-item>
           <a-form-item>
-            <a-button type="primary" @click="saveConfig('smtp')">保存</a-button>
+            <a-space>
+              <a-button type="primary" @click="saveConfig('smtp')">保存</a-button>
+              <a-button @click="testEmail('smtp')">测试邮件</a-button>
+            </a-space>
           </a-form-item>
         </a-form>
       </a-tab-pane>
@@ -106,8 +109,13 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getConfigs, updateConfigs } from '@/api/admin'
+import { getConfigs } from '@/api/admin';
 import { message } from 'ant-design-vue'
+import request from '@/utils/request'
+
+const updateConfigSingle = async (key, value) => {
+  return request.put('/admin/configs/update-single', { key, value })
+}
 
 const activeTab = ref('basic')
 
@@ -120,7 +128,6 @@ const fetchConfigs = async () => {
   try {
     const res = await getConfigs()
     const configs = res.data || {}
-    // 扁平化读取配置
     Object.assign(basicForm.value, {
       site_name: configs.site_name || 'CloudHost',
       site_title: configs.site_title || '云主机管理平台',
@@ -135,7 +142,7 @@ const fetchConfigs = async () => {
       smtp_user: configs.smtp_user || '',
       smtp_pass: configs.smtp_pass || '',
       smtp_from: configs.smtp_from || '',
-      smtp_secure: configs.smtp_secure || true
+      smtp_secure: configs.smtp_secure === true || configs.smtp_secure === 'true' || configs.smtp_secure === 1 || configs.smtp_secure === '1'
     })
     Object.assign(epayForm.value, {
       epay_url: configs.epay_url || '',
@@ -146,7 +153,7 @@ const fetchConfigs = async () => {
       epay_public_key: configs.epay_public_key || ''
     })
     Object.assign(authForm.value, {
-      auth_enabled: configs.auth_enabled || false,
+      auth_enabled: configs.auth_enabled === true || configs.auth_enabled === 'true' || configs.auth_enabled === 1 || configs.auth_enabled === '1',
       auth_api: configs.auth_api || '',
       auth_key: configs.auth_key || ''
     })
@@ -159,18 +166,44 @@ const saveConfig = async (type) => {
   try {
     let data = {}
     if (type === 'basic') {
-      data = basicForm.value
+      data = { ...basicForm.value }
     } else if (type === 'smtp') {
-      data = smtpForm.value
+      data = {
+        ...smtpForm.value,
+        // Convert types properly
+        smtp_secure: smtpForm.value.smtp_secure ? 'true' : 'false'
+      }
     } else if (type === 'epay') {
-      data = epayForm.value
+      data = { ...epayForm.value }
     } else if (type === 'auth') {
-      data = authForm.value
+      data = {
+        ...authForm.value,
+        // Convert boolean to string for Config model compatibility
+        auth_enabled: authForm.value.auth_enabled ? 'true' : 'false'
+      }
     }
-    await updateConfigs(data)
+    
+    // Use update-single endpoint for individual config saves (handles types properly)
+    for (const [key, value] of Object.entries(data)) {
+      await updateConfigSingle(key, value)
+    }
     message.success('保存成功')
   } catch (error) {
-    message.error(error.message)
+    message.error(error.message || '保存失败')
+  }
+}
+
+const testEmail = async (type) => {
+  try {
+    const smtpEmail = smtpForm.value.smtp_user
+    if (!smtpEmail) {
+      message.warning('请先配置SMTP用户名作为发件人')
+      return
+    }
+    await request.post('/admin/configs/test-email', { to: smtpEmail })
+    message.success('测试邮件已发送，请检查 ' + smtpEmail + ' 的收件箱')
+  } catch (error) {
+    message.error(error.message || '测试邮件发送失败')
   }
 }
 

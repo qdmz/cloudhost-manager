@@ -1,0 +1,11 @@
+{
+  "name": "cloudhost_backup_2026-06-07T01-25-51",
+  "created_at": "2026-06-07T01:25:51.827Z",
+  "type": "full",
+  "database": {
+    "path": "/root/cloudhost-manager/server/backups/cloudhost_backup_2026-06-07T01-25-51.sql",
+    "size": 27843
+  },
+  "files": null,
+  "size": 27843
+}

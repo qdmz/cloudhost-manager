@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid')
 const { Order, User, Product, Plan, Node, Service, BalanceLog } = require('../models')
 const { auth } = require('../middleware/auth')
 const epayService = require('../services/epay')
+const dayjs = require('dayjs')
 
 router.post('/', auth, async (req, res) => {
   try {
@@ -24,7 +25,7 @@ router.post('/', auth, async (req, res) => {
     
     const totalAmount = price * quantity
     
-    const orderNo = `ORD${Date.now()}${uuidv4().substring(0, 8).toUpperCase()}`
+    const orderNo = 'ORD' + Date.now() + uuidv4().substring(0, 8).toUpperCase()
     
     const order = await Order.create({
       user_id: req.userId,
@@ -115,47 +116,112 @@ router.post('/:id/cancel', auth, async (req, res) => {
 })
 
 router.post('/:id/pay', auth, async (req, res) => {
-    try {
-        const { payment_method = 'alipay' } = req.body
-        const order = await Order.findOne({
-            where: { id: req.params.id, user_id: req.userId }
-        })
-        
-        if (!order) return res.json({ code: 404, message: '订单不存在' })
-        
-        if (order.status !== 'pending') {
-            return res.json({ code: 400, message: '只有待支付的订单可以支付' })
-        }
-        
-        const payUrl = await epayService.createPayment(order.order_no, `订单${order.order_no}`, order.amount, payment_method)
-        
-        if (payUrl) {
-            console.log(`[Payment] Creating payment URL for order ${order.order_no}`)
-            res.json({ code: 200, message: '正在跳转支付', data: { pay_url: payUrl } })
-        } else {
-            res.json({ code: 200, message: '订单创建成功', data: { order_no: order.order_no } })
-        }
-    } catch (error) {
-        console.error('[Payment] Error:', error)
-        res.json({ code: 500, message: '创建失败' })
+  try {
+    const { payment_method = 'alipay' } = req.body
+    const order = await Order.findOne({
+      where: { id: req.params.id, user_id: req.userId }
+    })
+    
+    if (!order) return res.json({ code: 404, message: '订单不存在' })
+    
+    if (order.status !== 'pending') {
+      return res.json({ code: 400, message: '只有待支付的订单可以支付' })
     }
+    
+    // Balance payment
+    if (payment_method === 'balance') {
+      const user = await User.findByPk(req.userId)
+      const orderAmount = parseFloat(order.amount)
+      const userBalance = parseFloat(user.balance)
+      
+      if (userBalance < orderAmount) {
+        return res.json({ code: 400, message: '余额不足' })
+      }
+      
+      const newBalance = userBalance - orderAmount
+      
+      await user.sequelize.transaction(async (t) => {
+        await user.update({ balance: newBalance }, { transaction: t })
+        await order.update({
+          status: 'completed',
+          payment_method: 'balance',
+          paid_at: new Date()
+        }, { transaction: t })
+        await BalanceLog.create({
+          user_id: req.userId,
+          type: 'consume',
+          amount: -orderAmount,
+          balance_before: userBalance,
+          balance_after: newBalance,
+          note: '订单支付: ' + order.order_no,
+          related_id: order.id,
+          related_type: 'order'
+        }, { transaction: t })
+      })
+      
+      // Auto-create service if order has plan and node
+      if (order.plan_id && order.node_id && order.product_id) {
+        const plan = await Plan.findByPk(order.plan_id)
+        const node = await Node.findByPk(order.node_id)
+        
+        if (plan && node) {
+          let days = 30
+          if (order.cycle === 'quarterly') days = 90
+          if (order.cycle === 'yearly') days = 365
+          
+          const expireTime = dayjs().add(days, 'day').toDate()
+          
+          await Service.create({
+            user_id: req.userId,
+            node_id: order.node_id,
+            product_id: order.product_id,
+            plan_id: order.plan_id,
+            name: 'VPS-' + order.order_no,
+            type: 'kvm',
+            status: 'running',
+            cpu: plan.cpu,
+            memory: plan.memory,
+            disk: plan.disk,
+            price: parseFloat(order.amount) / (order.quantity || 1),
+            expire_time: expireTime
+          })
+        }
+      }
+      
+      res.json({ code: 200, message: '支付成功' })
+      return
+    }
+    
+    // External payment
+    const payUrl = await epayService.createPayment(order.order_no, '订单' + order.order_no, order.amount, payment_method)
+    
+    if (payUrl) {
+      console.log('[Payment] Creating payment URL for order ' + order.order_no)
+      res.json({ code: 200, message: '正在跳转支付', data: { pay_url: payUrl } })
+    } else {
+      res.json({ code: 200, message: '订单创建成功', data: { order_no: order.order_no } })
+    }
+  } catch (error) {
+    console.error('[Payment] Error:', error)
+    res.json({ code: 500, message: '创建失败' })
+  }
 })
 
-// 查询订单
+// Query order
 router.get('/:id/query', auth, async (req, res) => {
-    try {
-        const order = await Order.findOne({
-            where: { id: req.params.id, user_id: req.userId }
-        })
-        
-        if (!order) return res.json({ code: 404, message: '订单不存在' })
-        
-        const result = await epayService.queryOrder(order.order_no)
-        res.json({ code: 200, data: result })
-    } catch (error) {
-        console.error('[Payment] Error:', error)
-        res.json({ code: 500, message: '查询失败' })
-    }
+  try {
+    const order = await Order.findOne({
+      where: { id: req.params.id, user_id: req.userId }
+    })
+    
+    if (!order) return res.json({ code: 404, message: '订单不存在' })
+    
+    const result = await epayService.queryOrder(order.order_no)
+    res.json({ code: 200, data: result })
+  } catch (error) {
+    console.error('[Payment] Error:', error)
+    res.json({ code: 500, message: '查询失败' })
+  }
 })
 
 module.exports = router

@@ -33,6 +33,24 @@
           </a-input>
         </a-form-item>
         
+        <a-form-item label="验证码" name="captcha_code" :rules="[{ required: true, message: '请输入验证码' }]">
+          <div class="captcha-row">
+            <a-input
+              v-model:value="form.captcha_code"
+              size="large"
+              placeholder="请输入验证码"
+              style="flex: 1"
+            />
+            <img
+              :src="captchaImage"
+              alt="验证码"
+              class="captcha-img"
+              @click="refreshCaptcha"
+              title="点击刷新"
+            />
+          </div>
+        </a-form-item>
+        
         <a-form-item>
           <a-checkbox v-model:checked="form.agree">
             我已阅读并同意 <a href="#">服务条款</a> 和 <a href="#">隐私政策</a>
@@ -54,11 +72,12 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { message } from 'ant-design-vue'
 import { UserOutlined, LockOutlined, MailOutlined, PhoneOutlined } from '@ant-design/icons-vue'
+import request from '@/utils/request'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -69,9 +88,37 @@ const form = ref({
   password: '',
   confirm_password: '',
   phone: '',
+  captcha_code: '',
+  captcha_key: '',
   agree: false
 })
+const captchaImage = ref('')
 const loading = ref(false)
+
+const fetchCaptcha = async () => {
+  try {
+    const res = await request.get('/captcha', {
+      responseType: 'blob'
+    })
+    form.value.captcha_key = res.headers?.['x-captcha-key'] || ''
+    const blob = res.data
+    captchaImage.value = URL.createObjectURL(blob)
+  } catch (error) {
+    console.error('获取验证码失败', error)
+  }
+}
+
+const refreshCaptcha = () => {
+  form.value.captcha_code = ''
+  if (captchaImage.value) {
+    URL.revokeObjectURL(captchaImage.value)
+  }
+  fetchCaptcha()
+}
+
+onMounted(() => {
+  fetchCaptcha()
+})
 
 const validateConfirmPassword = async (rule, value) => {
   if (value !== form.value.password) {
@@ -81,12 +128,15 @@ const validateConfirmPassword = async (rule, value) => {
 
 const handleSubmit = async () => {
   loading.value = true
-  const result = await userStore.register({
+  const data = {
     username: form.value.username,
     email: form.value.email,
     password: form.value.password,
-    phone: form.value.phone
-  })
+    phone: form.value.phone,
+    captcha_code: form.value.captcha_code,
+    captcha_key: form.value.captcha_key
+  }
+  const result = await userStore.register(data)
   loading.value = false
   
   if (result.success) {
@@ -94,6 +144,7 @@ const handleSubmit = async () => {
     router.push('/login')
   } else {
     message.error(result.message)
+    refreshCaptcha()
   }
 }
 </script>
@@ -118,6 +169,21 @@ const handleSubmit = async () => {
       text-align: center;
       margin-bottom: 32px;
       font-size: 24px;
+    }
+    
+    .captcha-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      
+      .captcha-img {
+        width: 110px;
+        height: 48px;
+        cursor: pointer;
+        border-radius: 4px;
+        border: 1px solid #e8e8e8;
+        flex-shrink: 0;
+      }
     }
     
     .register-footer {

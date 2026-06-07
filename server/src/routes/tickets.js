@@ -60,14 +60,16 @@ router.get('/:id', auth, async (req, res) => {
       include: [
         {
           model: TicketMessage,
-          include: [{ model: User, as: 'user', attributes: ['username'] }]
+          include: [{ model: User, as: 'user', attributes: ['username'] }],
+          order: [['created_at', 'ASC']]
         }
       ]
     })
     
     if (!ticket) return res.json({ code: 404, message: '工单不存在' })
     
-    res.json({ code: 200, data: ticket })
+    const ticketData = ticket.toJSON()
+    res.json({ code: 200, data: ticketData })
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: '获取失败' })

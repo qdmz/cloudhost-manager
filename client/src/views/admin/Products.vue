@@ -72,9 +72,36 @@
           </a-col>
         </a-row>
       </a-form>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="默认节点">
+              <a-select v-model:value="productForm.node_id" placeholder="选择默认节点">
+                <a-select-option v-for="node in availableNodes" :key="node.id" :value="node.id">
+                  {{ node.name }} ({{ node.ip }})
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="默认虚拟化类型">
+              <a-select v-model:value="productForm.default_type" placeholder="选择虚拟化类型">
+                <a-select-option value="kvm">KVM</a-select-option>
+                <a-select-option value="docker">Docker</a-select-option>
+                <a-select-option value="lxc">LXC</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="默认操作系统">
+          <a-select v-model:value="productForm.default_os" placeholder="选择默认操作系统">
+            <a-select-option v-for="os in osOptions" :key="os.value" :value="os.value">{{ os.label }}</a-select-option>
+          </a-select>
+        </a-form-item>
+      </a-form>
     </a-modal>
     
-    <a-modal v-model:open="plansModalVisible" title="管理配置方案" width="800px">
+    <a-modal v-model:open="plansModalVisible"
+     title="管理配置方案" width="800px">
       <div style="margin-bottom: 16px;">
         <a-button type="primary" @click="openAddPlanModal">
           <PlusOutlined /> 添加配置方案
@@ -175,8 +202,31 @@ const productForm = reactive({
   cpu_range: '1-8',
   memory_range: '512-16384',
   disk_range: '10-500',
-  status: 'online'
+  status: 'online',
+  node_id: null,
+  default_type: 'kvm',
+  default_os: 'ubuntu-22.04'
 })
+
+const availableNodes = ref([])
+const osOptions = ref([
+  { label: 'Ubuntu 22.04', value: 'ubuntu-22.04' },
+  { label: 'Ubuntu 24.04', value: 'ubuntu-24.04' },
+  { label: 'Debian 12', value: 'debian-12' },
+  { label: 'CentOS 9', value: 'centos-9' },
+  { label: 'Windows Server 2022', value: 'windows-2022' },
+  { label: 'AlmaLinux 9', value: 'almalinux-9' },
+  { label: 'RockyLinux 9', value: 'rockylinux-9' }
+])
+
+const fetchAvailableNodes = async () => {
+  try {
+    const res = await getNodes({ status: 'online' })
+    availableNodes.value = res.data?.list || []
+  } catch (error) {
+    console.error('Failed to fetch nodes:', error)
+  }
+}
 
 const planForm = reactive({
   name: '',
@@ -329,5 +379,6 @@ const handleDeletePlan = async (id) => {
 
 onMounted(() => {
   fetchProducts()
+  fetchAvailableNodes()
 })
 </script>

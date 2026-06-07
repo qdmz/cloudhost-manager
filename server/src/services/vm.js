@@ -178,21 +178,87 @@ class VMService {
 
   // 创建虚拟机（真正在PVE上创建）
   async createVM(nodeId, options) {
-    const node = await Node.findByPk(nodeId)
+    // Auto-assign node if not specified
+    let resolvedNodeId = nodeId
+    if (!resolvedNodeId) {
+      if (options.productId) {
+        const product = await Product.findByPk(options.productId)
+        if (product?.node_id) {
+          resolvedNodeId = product.node_id
+        }
+      }
+      if (!resolvedNodeId) {
+        const nodes = await Node.findAll({
+          where: { status: 'online', type: options.type || 'kvm' },
+          order: [['created_at', 'ASC']],
+          limit: 1
+        })
+        if (nodes.length > 0) {
+          resolvedNodeId = nodes[0].id
+        } else {
+          throw new Error('没有可用的节点')
+        }
+      }
+    }
+    
+    const node = await Node.findByPk(resolvedNodeId)
     if (!node) throw new Error('节点不存在')
+    
+    // Auto-assign type from product default
+    let vmType = options.type
+    if (!vmType) {
+      if (options.productId) {
+        const product = await Product.findByPk(options.productId)
+        if (product?.default_type) {
+          vmType = product.default_type
+        } else {
+          vmType = 'kvm'
+        }
+      } else {
+        vmType = 'kvm'
+      }
+    }
+    
+    // Auto-assign OS template from product default
+    let osTemplate = options.template || options.os_template
+    if (!osTemplate) {
+      if (options.productId) {
+        const product = await Product.findByPk(options.productId)
+        if (product?.default_os) {
+          // Convert OS name to PVE template name
+          const osMapping = {
+            'ubuntu-22.04': 'ubuntu-22.04-default',
+            'ubuntu-24.04': 'ubuntu-24.04-default',
+            'debian-12': 'debian-12-default',
+            'centos-9': 'centos-9-default',
+            'almalinux-9': 'almalinux-9-default',
+            'rockylinux-9': 'rockylinux-9-default',
+            'windows-2022': 'windows-2022-default'
+          }
+          osTemplate = osMapping[product.default_os] || product.default_os
+        }
+      }
+    }
     
     const client = await this.getClient(node)
     
     // 生成下一个可用VMID
     const nextVmid = await client.getNextVmid()
     
+    // Merge auto-assigned values into options
+    const resolvedOptions = {
+      ...options,
+      type: vmType,
+      template: osTemplate
+    }
+    
     // 根据类型创建不同的虚拟机
-    if (options.type === 'lxc' || options.type === 'lxd' || options.type === 'incus') {
+    if (resolvedOptions.type === 'lxc' || resolvedOptions.type === 'lxd' || resolvedOptions.type === 'incus') {
       // 创建LXC容器
-      return await this.createLXC(client, nextVmid, options, node)
+      return await this.createLXC(client, nextVmid, resolvedOptions, node)
     } else {
       // 创建KVM虚拟机
-      return await this.createKVM(client, nextVmid, options, node)
+      return await this.createKVM(client, nextVmid, resolvedOptions, node)
     }
   }
 

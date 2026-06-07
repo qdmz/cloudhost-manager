@@ -11,10 +11,10 @@ export const useUserStore = defineStore('user', () => {
   const isAdmin = computed(() => userInfo.value?.role === 'admin')
   const isVerified = computed(() => userInfo.value?.email_verified && userInfo.value?.identity_verified)
 
-  async function login(username, password) {
+  async function login(data) {
     isLoading.value = true
     try {
-      const res = await apiLogin({ username, password })
+      const res = await apiLogin(data)
       if (res.code === 200) {
         token.value = res.data.token
         localStorage.setItem('token', res.data.token)

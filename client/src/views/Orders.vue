@@ -52,6 +52,7 @@
             <a-radio-group v-model:value="selectedPaymentMethod">
               <a-radio value="alipay">支付宝</a-radio>
               <a-radio value="wechat">微信支付</a-radio>
+              <a-radio value="balance">余额支付 (当前: ¥{{ userInfo?.balance || 0 }})</a-radio>
               <a-radio value="qqpay">QQ钱包</a-radio>
             </a-radio-group>
           </a-form-item>
