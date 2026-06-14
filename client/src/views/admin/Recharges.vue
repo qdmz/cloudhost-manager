@@ -71,7 +71,7 @@ const rechargeColumns = [
   { title: '支付方式', dataIndex: 'payment_method', width: 100 },
   { title: '交易号', dataIndex: 'trade_no', width: 200 },
   { title: '状态', key: 'status', width: 100 },
-  { title: '创建时间', dataIndex: 'created_at', width: 180 },
+  { title: '创建时间', dataIndex: 'createdAt', width: 180 },
   { title: '操作', key: 'action', width: 160 }
 ]
 
@@ -83,7 +83,7 @@ const balanceLogColumns = [
   { title: '变动前余额', dataIndex: 'balance_before', width: 120 },
   { title: '变动后余额', dataIndex: 'balance_after', width: 120 },
   { title: '备注', dataIndex: 'note' },
-  { title: '时间', dataIndex: 'created_at', width: 180 }
+  { title: '时间', dataIndex: 'createdAt', width: 180 }
 ]
 
 const getStatusColor = (status) => {

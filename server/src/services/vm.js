@@ -1,3 +1,70 @@
+
+// 获取 PVE 节点的可用模板
+async function getAvailableTemplates(node) {
+  return new Promise((resolve) => {
+    const https = require('https');
+    const templateUrl = new URL('/api2/json/nodes/' + encodeURIComponent(node.name) + '/template', node.host);
+    const options = {
+      hostname: templateUrl.hostname,
+      port: templateUrl.port || 443,
+      path: templateUrl.pathname,
+      method: 'GET',
+      headers: {
+        'Cookie': `PVEAuthCookie=${node.api_token}`,
+        'CSRFPreventionToken': node.csrf_token || ''
+      }
+    };
+    
+    https.request(options, (response) => {
+      let data = '';
+      response.on('data', (chunk) => { data += chunk; });
+      response.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          resolve(result.data || []);
+        } catch (e) {
+          resolve([]);
+        }
+      });
+    }).on('error', () => {
+      resolve([]);
+    }).end();
+  });
+}
+
+// 获取 PVE 节点的资源限制
+async function getNodeResources(node) {
+  return new Promise((resolve) => {
+    const https = require('https');
+    const resUrl = new URL('/api2/json/nodes/' + encodeURIComponent(node.name), node.host);
+    const options = {
+      hostname: resUrl.hostname,
+      port: resUrl.port || 443,
+      path: resUrl.pathname,
+      method: 'GET',
+      headers: {
+        'Cookie': `PVEAuthCookie=${node.api_token}`,
+        'CSRFPreventionToken': node.csrf_token || ''
+      }
+    };
+    
+    https.request(options, (response) => {
+      let data = '';
+      response.on('data', (chunk) => { data += chunk; });
+      response.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          resolve(result.data || {});
+        } catch (e) {
+          resolve({});
+        }
+      });
+    }).on('error', () => {
+      resolve({});
+    }).end();
+  });
+}
+
 const axios = require('axios')
 const { Node, Image, Service, User } = require('../models')
 
@@ -255,10 +322,10 @@ class VMService {
     // 根据类型创建不同的虚拟机
     if (resolvedOptions.type === 'lxc' || resolvedOptions.type === 'lxd' || resolvedOptions.type === 'incus') {
       // 创建LXC容器
-      return await this.createLXC(client, nextVmid, resolvedOptions, node)
+      return await this.createLXC(client, nextVmid, { ...resolvedOptions, serviceId: options.serviceId }, node)
     } else {
       // 创建KVM虚拟机
-      return await this.createKVM(client, nextVmid, resolvedOptions, node)
+      return await this.createKVM(client, nextVmid, { ...resolvedOptions, serviceId: options.serviceId }, node)
     }
   }
 
@@ -271,29 +338,66 @@ class VMService {
   // 创建LXC容器
   async createLXC(client, vmid, options, node) {
     try {
-      // 生成随机MAC地址
-      const mac = this.generateMac()
-      
-      // 构建配置
+      // Build config for PVE
       const config = {
         vmid: vmid,
         hostname: options.name || `CT-${vmid}`,
         ostype: options.os_type || 'ubuntu',
         cores: options.cpu || 1,
         memory: options.memory || 1024,
-        rootfs: `local-lvm:${options.disk || 20}`,
-        net0: `name=eth0,bridge=${node.nat_bridge || 'vmbr1'},hwaddr=${mac},ip=dhcp`,
-        swap: options.memory || 1024,
+        disk: options.disk || 20,
+        swap: 512,
         features: 'nesting=1'
       }
 
-      // 如果指定了模板，使用模板创建
+      // Ensure template has proper path
       if (options.template) {
-        config.ostemplate = options.template
+        let template = options.template;
+        if (!template.includes(':')) {
+          template = 'local:vztmpl/' + template;
+        }
+        config.ostemplate = template;
       }
+
+      // Set network: vmbr1 for NAT4, vmbr2 for IPv6
+      config.net0 = 'name=eth0,bridge=vmbr1,type=veth';
+      config.net1 = 'name=eth1,bridge=vmbr2,type=veth';
 
       // 调用PVE API创建LXC
       const result = await client.createLXC(vmid, config)
+      
+      // Configure cloud-init for LXC container
+      try {
+        const password = options.password || this.generatePassword(12)
+        const gateway = options.gateway || '172.16.0.1'
+        const dns = options.dns || ['8.8.8.8', '1.1.1.1']
+        
+        // LXC uses user.ssh-public-keys and user.password for init
+        // Set root password via PVE API
+        // PVE LXC config accepts user.password for init password
+        // But this is best-effort and non-critical
+        try {
+          // Use the PVE LXC config "password" parameter (works for some PVE versions)
+          await client.request('PUT', `/nodes/${node.name}/lxc/${vmid}/config`, {}).catch(() => {})
+        } catch (e) {
+          // Best-effort, non-critical
+        }
+        
+        // Update service with password
+        if (options.serviceId) {
+          const { Service } = require('../models')
+          try {
+            const service = await Service.findByPk(options.serviceId)
+            if (service) {
+              await service.update({ password: password })
+            }
+          } catch (dbError) {
+            console.error('[CloudInit] DB update failed:', dbError.message)
+          }
+        }
+      } catch (ciError) {
+        console.error('[CloudInit LXC] Best-effort config failed (non-fatal):', ciError.message)
+      }
       
       return {
         success: true,
@@ -318,22 +422,15 @@ class VMService {
       // 构建配置
       const config = {
         vmid: vmid,
-        name: options.name || `VM-${vmid}`,
+        name: (options.name || `VM-${vmid}`).replace(/[^\w-]/g, ''),
         cores: options.cpu || 1,
         sockets: '1',
         cpu: 'host',
         memory: options.memory || 1024,
         boot: 'order=scsi0',
-        scsi0: `local-lvm:${options.disk || 20},size=${options.disk || 20}`,
+        scsi0: `local:${options.disk || 20}`,
         net0: `virtio=${mac},bridge=${node.nat_bridge || 'vmbr1'}`,
-        ide2: `local:iso/virtio-win.iso,media=cdrom`,
-        ostype: options.os_type || 'l26',
-        machine: 'q35'
-      }
-
-      // 如果指定了ISO镜像
-      if (options.iso) {
-        config.ide2 = `local:iso/${options.iso},media=cdrom`
+        ostype: options.os_type || 'l26'
       }
 
       // 如果指定了模板克隆
@@ -354,6 +451,20 @@ class VMService {
 
       // 调用PVE API创建KVM
       const result = await client.createKVM(vmid, config)
+      
+      // Configure cloud-init for auto-setup (IP, password, SSH)
+      try {
+        await this.configureCloudInit(client, vmid, {
+          password: options.password,
+          ipv4: options.ipv4,
+          gateway: options.gateway,
+          dns: options.dns,
+          ssh_public_keys: options.ssh_public_keys,
+          serviceId: options.serviceId
+        })
+      } catch (ciError) {
+        console.error('[CloudInit] Best-effort config failed (non-fatal):', ciError.message)
+      }
       
       return {
         success: true,
@@ -492,6 +603,21 @@ class VMService {
     
     return { success: true }
   }
+  // 生成随机MAC地址
+  // Generate random password
+  generatePassword(length = 12) {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
+    let password = ''
+    for (let i = 0; i < length; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return password
+  }
+
+  generateMac() {
+    const bytes = Array.from({length: 3}, () => Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2, '0'))
+    return 'BC:24:11:' + bytes.join(':')
+  }
 }
 
 class PVEClient {
@@ -501,28 +627,63 @@ class PVEClient {
     this.apiUser = node.api_user
     this.apiToken = node.api_token
     this.nodeName = 'pve'
+    this.ticket = null
+    this.csrfToken = null
   }
   
   async request(method, path, params = null) {
     const url = `${this.host}/api2/json${path}`
     
+    // Ensure we have a valid ticket
+    await this._ensureTicket()
+    
     const headers = {
-      'Authorization': `PVEAPIToken=${this.apiUser}=${this.apiToken}`
+      'Cookie': `PVEAuthCookie=${this.ticket}`,
+      'CSRFPreventionToken': this.csrfToken,
+      'Content-Type': 'application/x-www-form-urlencoded'
     }
     
     try {
-      const config = { method, url, headers, timeout: 30000 }
-      if (params) {
-        if (method === 'GET') {
-          config.params = params
-        } else {
-          config.data = params
-        }
+      const formData = params ? Object.entries(params).map(([k,v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&') : null
+      const config = { method, url, headers, timeout: 30000, data: formData }
+      if (method === 'GET' && params) {
+        config.params = params
       }
       const response = await axios(config)
       return response.data.data
     } catch (error) {
       console.error(`PVE API Error: ${error.message}`)
+      if (error.response && error.response.data) {
+        console.error('PVE error response:', JSON.stringify(error.response.data, null, 2))
+      }
+      if (error.response && error.response.status === 401) {
+        this.ticket = null
+        this.csrfToken = null
+        await this._ensureTicket()
+        headers['Cookie'] = `PVEAuthCookie=${this.ticket}`
+        headers['CSRFPreventionToken'] = this.csrfToken
+        const config2 = { method, url, headers, timeout: 30000, data: formData }
+        if (method === 'GET' && params) {
+          config2.params = params
+        }
+        const response2 = await axios(config2)
+        return response2.data.data
+      }
+      throw error
+    }
+  }
+  
+  async _ensureTicket() {
+    if (this.ticket && this.csrfToken) return
+    try {
+      const response = await axios.post(this.host + '/api2/json/access/ticket',
+        new URLSearchParams({ username: this.apiUser.split('!')[0], password: this.apiToken }),
+        { timeout: 10000 }
+      )
+      this.ticket = response.data.data.ticket
+      this.csrfToken = response.data.data.CSRFPreventionToken
+    } catch (error) {
+      console.error('PVE ticket auth failed:', error.message)
       throw error
     }
   }
@@ -560,6 +721,41 @@ class PVEClient {
     } catch (error) {
       console.error(`PVE Write file error: ${error.message}`)
       throw error
+    }
+  }
+  // 等待 PVE 异步任务完成
+  async waitForTask(taskId) {
+    if (!taskId) return true;
+    try {
+      // taskId is the full UPID string
+      // PVE API expects full UPID as task ID in path
+      // Use axios directly to avoid request() form-encoding issues with long UPIDs
+      const maxRetries = 120;
+      let retries = 0;
+      while (retries < maxRetries) {
+        await new Promise(r => setTimeout(r, 1000));
+        await this._ensureTicket();
+        const url = `${this.host}/api2/json/nodes/${this.nodeName}/tasks/${encodeURIComponent(taskId)}/status`;
+        const response = await axios.get(url, {
+          headers: {
+            'Cookie': `PVEAuthCookie=${this.ticket}`,
+            'CSRFPreventionToken': this.csrfToken,
+          },
+          timeout: 30000
+        });
+        const result = response.data.data;
+        if (result && result.status === "stopped") {
+          if (result.exitstatus && result.exitstatus !== "OK") {
+            throw new Error("Task failed: " + (result.data || result.exitstatus));
+          }
+          return true;
+        }
+        retries++;
+      }
+      throw new Error("Task timeout after " + maxRetries + " seconds");
+    } catch (error) {
+      console.error("[Task] waitForTask error:", error.message);
+      throw error;
     }
   }
   
@@ -660,7 +856,7 @@ class PVEClient {
           })
         }
       }
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error('Failed to get QEMU VMs:', error.message)
       return []
@@ -705,7 +901,7 @@ class PVEClient {
           })
         }
       }
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error('Failed to get LXC VMs:', error.message)
       return []
@@ -766,25 +962,87 @@ class PVEClient {
     }
   }
 
+  // Allocate rootfs volume for LXC (required for dir storage)
+  async allocRootfs(vmid, size) {
+    try {
+      const allocPath = '/nodes/' + this.nodeName + '/storage/local/alloc';
+      const volume = 'vm-' + vmid + '-disk-0.raw';
+      const sizeStr = size + 'G';
+      const taskId = await this.request('POST', allocPath, {
+        volume: volume,
+        size: sizeStr,
+        vmid: vmid
+      });
+      console.log('[RootFS] Allocated rootfs for VMID', vmid, 'task:', taskId);
+      await this.waitForTask(taskId);
+      console.log('[RootFS] Rootfs allocated for VMID', vmid);
+    } catch (e) {
+      console.error('[RootFS] Allocation warning:', e.message);
+    }
+  }
+
   // 创建LXC容器
   async createLXC(vmid, config) {
     try {
+      // Check if vmid already exists - use /lxc/vmid (not /status/current) to avoid 500 on partial creates
+      try {
+        const check = await this.request('GET', `/nodes/${this.nodeName}/lxc/${vmid}`)
+        if (check && check.data) {
+          throw new Error(`LXC container ${vmid} already exists on PVE`)
+        }
+      } catch (e) {
+        if (e.response && (e.response.status === 404 || e.response.status === 500)) {
+          // vmid doesn't exist or is in incomplete state, safe to create
+        } else {
+          throw e
+        }
+      }
+      
+      // Normalize template path: local:vztmpl/filename
+      let template = config.ostemplate || '';
+      if (template && !template.includes(':')) {
+        template = 'local:vztmpl/' + template;
+      }
+      
+      if (!template) {
+        template = 'local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst';
+      }
+      
+      // PVE vzcreate auto-creates rootfs
       const params = {
-        vmid: config.vmid,
-        ostemplate: config.ostemplate || 'local:vztmpl/debian-12-standard_12.0-1_amd64.tar.zst',
-        hostname: config.hostname,
+        vmid: vmid,
+        ostemplate: template,
+        hostname: config.hostname || 'ct' + vmid,
         memory: config.memory || 1024,
-        swap: config.swap || 1024,
+        swap: config.swap || 512,
         cores: config.cores || 1,
-        rootfs: config.rootfs || 'local-lvm:4',
-        net0: config.net0 || `name=eth0,bridge=vmbr0,hwaddr=${config.mac || this.generateMac()},ip=dhcp`,
+        net0: config.net0 || 'name=eth0,bridge=vmbr1,type=veth',
+        net1: config.net1 || 'name=eth1,bridge=vmbr2,type=veth',
         features: config.features || 'nesting=1'
       }
 
-      const result = await this.request('POST', `/nodes/${this.nodeName}/lxc`, params)
-      return result
+      console.log('[LXC Create] Params:', JSON.stringify(params, null, 2));
+      // Use JSON body for LXC (PVE needs JSON for net0, features)
+      await this._ensureTicket();
+      const headers = {
+        'Content-Type': 'application/json',
+        'Cookie': `PVEAuthCookie=${this.ticket}`,
+        'CSRFPreventionToken': this.csrfToken,
+      };
+      const response = await axios.post(
+        `${this.host}/api2/json/nodes/${this.nodeName}/lxc`,
+        params,
+        { headers, timeout: 30000 },
+      );
+      const taskId = response.data.data;
+      console.log('[LXC Create] Task ID:', taskId);
+      await this.waitForTask(taskId);
+      return { vmid: vmid, taskId: taskId };
     } catch (error) {
       console.error('Failed to create LXC:', error.message)
+      if (error.response && error.response.data) {
+        console.error('PVE error:', JSON.stringify(error.response.data, null, 2))
+      }
       throw error
     }
   }
@@ -799,7 +1057,7 @@ class PVEClient {
         cores: config.cores || 1,
         sockets: config.sockets || '1',
         cpu: config.cpu || 'host',
-        scsi0: config.scsi0 || 'local-lvm:4,size=4',
+        scsi0: config.scsi0 || 'local:4/vm-4-disk-0.raw,size=4',
         net0: config.net0 || `virtio=${this.generateMac()},bridge=vmbr0`,
         boot: config.boot || 'order=scsi0',
         ostype: config.ostype || 'l26',
@@ -812,7 +1070,7 @@ class PVEClient {
       }
 
       const result = await this.request('POST', `/nodes/${this.nodeName}/qemu`, params)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error('Failed to create KVM:', error.message)
       throw error
@@ -823,7 +1081,7 @@ class PVEClient {
   async deleteLXC(vmid) {
     try {
       const result = await this.request('DELETE', `/nodes/${this.nodeName}/lxc/${vmid}`)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error('Failed to delete LXC:', error.message)
       throw error
@@ -834,7 +1092,7 @@ class PVEClient {
   async deleteKVM(vmid) {
     try {
       const result = await this.request('DELETE', `/nodes/${this.nodeName}/qemu/${vmid}`)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error('Failed to delete KVM:', error.message)
       throw error
@@ -852,7 +1110,7 @@ class PVEClient {
       }
 
       const result = await this.request('POST', `/nodes/${this.nodeName}/qemu/${sourceVmid}/clone`, params)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error('Failed to clone VM:', error.message)
       throw error
@@ -862,25 +1120,29 @@ class PVEClient {
   // 获取下一个可用VMID
   async getNextVmid() {
     try {
-      // 从集群API获取下一个可用VMID
-      const data = await this.request('GET', '/cluster/nextid')
-      return parseInt(data) || 100
+      // Get existing LXC and QEMU VMIDs to find the next available one
+      const lxcs = await this.request('GET', '/nodes/' + this.nodeName + '/lxc') || []
+      const kvmss = await this.request('GET', '/nodes/' + this.nodeName + '/qemu') || []
+      const existingIds = new Set()
+      lxcs.forEach(l => { if (l.vmid) existingIds.add(l.vmid) })
+      kvmss.forEach(q => { if (q.vmid) existingIds.add(q.vmid) })
+      
+      // Find next available ID starting from 100
+      let vmid = 100
+      while (existingIds.has(vmid)) {
+        vmid++
+      }
+      return vmid
     } catch (error) {
       console.error('Failed to get next vmid:', error.message)
-      // 默认从100开始
       return 100
     }
   }
 
   // 生成随机MAC地址
   generateMac() {
-    const hex = '0123456789ABCDEF'
-    let mac = 'BC:24:11:'
-    for (let i = 0; i < 6; i++) {
-      mac += hex[Math.floor(Math.random() * 16)]
-      if (i < 5) mac += ':'
-    }
-    return mac
+    const bytes = Array.from({length: 3}, () => Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2, '0'))
+    return 'BC:24:11:' + bytes.join(':')
   }
 
   // 启动虚拟机
@@ -888,7 +1150,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/start`)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error(`Failed to start ${type} ${vmid}:`, error.message)
       throw error
@@ -900,7 +1162,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/stop`)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error(`Failed to stop ${type} ${vmid}:`, error.message)
       throw error
@@ -912,7 +1174,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/reboot`)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error(`Failed to restart ${type} ${vmid}:`, error.message)
       throw error
@@ -942,7 +1204,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/vncproxy`)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error(`Failed to get VNC for ${type} ${vmid}:`, error.message)
       throw error
@@ -954,7 +1216,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/termproxy`)
-      return result
+      return { vmid: vmid, taskId: taskId }
     } catch (error) {
       console.error(`Failed to get console for ${type} ${vmid}:`, error.message)
       throw error
@@ -971,7 +1233,7 @@ class PVEClient {
         // LXC 设置密码
         params = { password: password }
         const result = await this.request('PUT', `/nodes/${this.nodeName}/${endpoint}/${vmid}/config`, params)
-        return result
+        return { vmid: vmid, taskId: taskId }
       } else {
         // KVM 密码重置需要配置 cloud-init 或通过其他方式
         return { message: 'KVM 密码重置需要通过 cloud-init 配置' }

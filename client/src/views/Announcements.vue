@@ -12,7 +12,7 @@
             <span class="title">{{ item.title }}</span>
           </div>
           <div class="announcement-meta">
-            <span><CalendarOutlined /> {{ formatDate(item.created_at) }}</span>
+            <span><CalendarOutlined /> {{ formatDate(item.createdAt) }}</span>
             <span><EyeOutlined /> {{ item.views || 0 }} 次阅读</span>
           </div>
           <div class="announcement-content">{{ item.summary }}</div>
@@ -24,7 +24,7 @@
     <a-modal v-model:open="showModal" :title="currentAnnouncement?.title" width="800px" :footer="null">
       <div class="modal-content" v-html="currentAnnouncement?.content"></div>
       <div class="modal-footer">
-        <span>发布时间：{{ formatDate(currentAnnouncement?.created_at) }}</span>
+        <span>发布时间：{{ formatDate(currentAnnouncement?.createdAt) }}</span>
       </div>
     </a-modal>
   </div>

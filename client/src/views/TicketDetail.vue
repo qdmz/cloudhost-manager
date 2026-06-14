@@ -18,7 +18,7 @@
           <div class="message-content">
             <div class="message-header">
               <span class="sender">{{ msg.is_admin ? '客服' : '我' }}</span>
-              <span class="time">{{ formatDate(msg.created_at) }}</span>
+              <span class="time">{{ formatDate(msg.createdAt) }}</span>
             </div>
             <div class="message-body" v-html="formatContent(msg.content)"></div>
             <div v-if="msg.attachments?.length" class="message-attachments">
@@ -86,7 +86,7 @@ const fetchTicket = async () => {
       id: msg.id,
       content: msg.content || "",
       is_admin: msg.is_admin || false,
-      created_at: msg.created_at,
+      created_at: msg.createdAt,
       user: msg.user
     }))
     console.log('Ticket data:', res.data)

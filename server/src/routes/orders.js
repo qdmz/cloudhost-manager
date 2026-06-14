@@ -1,14 +1,19 @@
 const express = require('express')
 const router = express.Router()
 const { v4: uuidv4 } = require('uuid')
-const { Order, User, Product, Plan, Node, Service, BalanceLog } = require('../models')
+const { Order, User, Product, Plan, Node, Service, BalanceLog, Ticket, TicketMessage } = require('../models')
 const { auth } = require('../middleware/auth')
 const epayService = require('../services/epay')
 const dayjs = require('dayjs')
 
+// Create order
 router.post('/', auth, async (req, res) => {
   try {
     const { product_id, plan_id, node_id, cycle, quantity = 1 } = req.body
+    
+    if (!product_id || !plan_id) {
+      return res.json({ code: 400, message: '请提供产品和配置方案' })
+    }
     
     const product = await Product.findByPk(product_id)
     if (!product) return res.json({ code: 404, message: '产品不存在' })
@@ -16,8 +21,11 @@ router.post('/', auth, async (req, res) => {
     const plan = await Plan.findByPk(plan_id)
     if (!plan) return res.json({ code: 404, message: '配置方案不存在' })
     
-    const node = await Node.findByPk(node_id)
-    if (!node) return res.json({ code: 404, message: '节点不存在' })
+    let node
+    if (node_id) {
+      node = await Node.findByPk(node_id)
+      if (!node) return res.json({ code: 404, message: '节点不存在' })
+    }
     
     let price = plan.price_monthly
     if (cycle === 'quarterly') price = plan.price_quarterly || plan.price_monthly * 3
@@ -32,7 +40,7 @@ router.post('/', auth, async (req, res) => {
       order_no: orderNo,
       product_id,
       plan_id,
-      node_id,
+      node_id: node_id || null,
       cycle,
       quantity,
       amount: totalAmount,
@@ -41,11 +49,12 @@ router.post('/', auth, async (req, res) => {
     
     res.json({ code: 200, message: '订单创建成功', data: order })
   } catch (error) {
-    console.error(error)
-    res.json({ code: 500, message: '创建失败' })
+    console.error('[Orders] Create error:', error)
+    res.json({ code: 500, message: '创建失败: ' + error.message })
   }
 })
 
+// List orders
 router.get('/', auth, async (req, res) => {
   try {
     const { page = 1, page_size = 20, status } = req.query
@@ -56,8 +65,9 @@ router.get('/', auth, async (req, res) => {
     const { count, rows } = await Order.findAndCountAll({
       where,
       include: [
-        { model: Product, as: 'product', attributes: ['name'] },
-        { model: Plan, as: 'plan', attributes: ['name'] }
+        { model: Product, as: 'product', attributes: ['name', 'type'] },
+        { model: Plan, as: 'plan', attributes: ['name', 'cpu', 'memory', 'disk', 'bandwidth', 'traffic', 'price_monthly'] },
+        { model: Node, as: 'node', attributes: ['name', 'server_ip'] }
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(page_size),
@@ -69,11 +79,12 @@ router.get('/', auth, async (req, res) => {
       data: { list: rows, total: count, page: parseInt(page), page_size: parseInt(page_size) }
     })
   } catch (error) {
-    console.error(error)
-    res.json({ code: 500, message: '获取失败' })
+    console.error('[Orders] List error:', error)
+    res.json({ code: 500, message: '获取订单失败: ' + error.message })
   }
 })
 
+// Get single order
 router.get('/:id', auth, async (req, res) => {
   try {
     const order = await Order.findOne({
@@ -89,11 +100,12 @@ router.get('/:id', auth, async (req, res) => {
     
     res.json({ code: 200, data: order })
   } catch (error) {
-    console.error(error)
-    res.json({ code: 500, message: '获取失败' })
+    console.error('[Orders] Get error:', error)
+    res.json({ code: 500, message: '获取失败: ' + error.message })
   }
 })
 
+// Cancel order
 router.post('/:id/cancel', auth, async (req, res) => {
   try {
     const order = await Order.findOne({
@@ -107,14 +119,14 @@ router.post('/:id/cancel', auth, async (req, res) => {
     }
     
     await order.update({ status: 'cancelled' })
-    
     res.json({ code: 200, message: '订单已取消' })
   } catch (error) {
-    console.error(error)
+    console.error('[Orders] Cancel error:', error)
     res.json({ code: 500, message: '取消失败' })
   }
 })
 
+// Pay order
 router.post('/:id/pay', auth, async (req, res) => {
   try {
     const { payment_method = 'alipay' } = req.body
@@ -143,7 +155,7 @@ router.post('/:id/pay', auth, async (req, res) => {
       await user.sequelize.transaction(async (t) => {
         await user.update({ balance: newBalance }, { transaction: t })
         await order.update({
-          status: 'completed',
+          status: 'paid',
           payment_method: 'balance',
           paid_at: new Date()
         }, { transaction: t })
@@ -159,31 +171,52 @@ router.post('/:id/pay', auth, async (req, res) => {
         }, { transaction: t })
       })
       
-      // Auto-create service if order has plan and node
+      // Auto-create service
       if (order.plan_id && order.node_id && order.product_id) {
+        const vmService = require('../services/vm')
         const plan = await Plan.findByPk(order.plan_id)
         const node = await Node.findByPk(order.node_id)
+        const product = await Product.findByPk(order.product_id)
         
-        if (plan && node) {
-          let days = 30
-          if (order.cycle === 'quarterly') days = 90
-          if (order.cycle === 'yearly') days = 365
-          
-          const expireTime = dayjs().add(days, 'day').toDate()
+        let expireDays = 30
+        if (order.cycle === 'quarterly') expireDays = 90
+        if (order.cycle === 'yearly') expireDays = 365
+        const expireAt = new Date()
+        expireAt.setDate(expireAt.getDate() + expireDays)
+        
+        for (let i = 0; i < (order.quantity || 1); i++) {
+          let pveVmid = ''
+          try {
+            const pveResult = await vmService.createVM(order.node_id, {
+              name: product.name + '-' + (i + 1),
+              type: product.type || 'kvm',
+              cpu: plan.cpu,
+              memory: plan.memory,
+              disk: plan.disk,
+              bandwidth: plan.bandwidth,
+              traffic: plan.traffic
+            })
+            pveVmid = String(pveResult.vmid)
+          } catch (pveError) {
+            console.error('PVE VM creation failed:', pveError.message)
+          }
           
           await Service.create({
             user_id: req.userId,
             node_id: order.node_id,
             product_id: order.product_id,
             plan_id: order.plan_id,
-            name: 'VPS-' + order.order_no,
-            type: 'kvm',
+            order_id: order.id,
+            name: `${product.name}-${i + 1}`,
+            type: product.type || 'kvm',
             status: 'running',
             cpu: plan.cpu,
             memory: plan.memory,
             disk: plan.disk,
+            bandwidth: plan.bandwidth,
+            vmid: pveVmid,
             price: parseFloat(order.amount) / (order.quantity || 1),
-            expire_time: expireTime
+            expire_time: expireAt
           })
         }
       }
@@ -192,18 +225,19 @@ router.post('/:id/pay', auth, async (req, res) => {
       return
     }
     
-    // External payment
-    const payUrl = await epayService.createPayment(order.order_no, '订单' + order.order_no, order.amount, payment_method)
+    // External payment via EPAY
+    const payName = order.product_id ? '订购产品' : '订单' + order.order_no
+    const payUrl = await epayService.createPayment(order.order_no, payName, order.amount, payment_method)
     
     if (payUrl) {
-      console.log('[Payment] Creating payment URL for order ' + order.order_no)
       res.json({ code: 200, message: '正在跳转支付', data: { pay_url: payUrl } })
     } else {
-      res.json({ code: 200, message: '订单创建成功', data: { order_no: order.order_no } })
+      // EPAY not configured, mark as created
+      res.json({ code: 200, data: { order_no: order.order_no, message: '支付配置未就绪，请联系管理员' } })
     }
   } catch (error) {
-    console.error('[Payment] Error:', error)
-    res.json({ code: 500, message: '创建失败' })
+    console.error('[Orders] Pay error:', error)
+    res.json({ code: 500, message: '创建支付失败: ' + error.message })
   }
 })
 
@@ -213,14 +247,61 @@ router.get('/:id/query', auth, async (req, res) => {
     const order = await Order.findOne({
       where: { id: req.params.id, user_id: req.userId }
     })
-    
     if (!order) return res.json({ code: 404, message: '订单不存在' })
     
-    const result = await epayService.queryOrder(order.order_no)
-    res.json({ code: 200, data: result })
+    res.json({ code: 200, data: { status: order.status, order_no: order.order_no } })
   } catch (error) {
-    console.error('[Payment] Error:', error)
+    console.error('[Orders] Query error:', error)
     res.json({ code: 500, message: '查询失败' })
+  }
+})
+
+
+// Use voucher
+router.post('/use-voucher', auth, async (req, res) => {
+  try {
+    const { voucher_code } = req.body
+    if (!voucher_code) {
+      return res.json({ code: 400, message: '请输入兑换码' })
+    }
+    
+    const { Voucher, User, BalanceLog } = require('../models')
+    const voucher = await Voucher.findOne({ 
+      where: { code: voucher_code, is_used: false } 
+    })
+    
+    if (!voucher) {
+      return res.json({ code: 404, message: '兑换码无效或已使用' })
+    }
+    
+    if (voucher.expired_at && new Date(voucher.expired_at) < new Date()) {
+      return res.json({ code: 400, message: '兑换码已过期' })
+    }
+    
+    voucher.is_used = true
+    voucher.used_by = req.userId
+    voucher.used_at = new Date()
+    await voucher.save()
+    
+    const user = await User.findByPk(req.userId)
+    const newBalance = (parseFloat(user.balance) || 0) + parseFloat(voucher.amount)
+    await user.update({ balance: newBalance })
+    
+    await BalanceLog.create({
+      user_id: req.userId,
+      type: 'topup',
+      amount: voucher.amount,
+      balance_before: user.balance,
+      balance_after: newBalance,
+      note: '兑换码充值: ' + voucher_code,
+      related_id: voucher.id,
+      related_type: 'voucher'
+    })
+    
+    res.json({ code: 200, message: '兑换成功，账户余额已增加' })
+  } catch (error) {
+    console.error('[Orders] Use voucher error:', error)
+    res.json({ code: 500, message: '兑换失败: ' + error.message })
   }
 })
 

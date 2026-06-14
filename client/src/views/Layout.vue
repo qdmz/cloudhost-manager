@@ -94,7 +94,9 @@
     </main>
     
     <footer class="footer">
-      <p>© 2024 CloudHost 云主机管理平台 | 技术支持</p>
+      <p v-if="siteName">© {{ siteName }} | {{ siteTitle }}</p>
+      <p v-if="footerContent">{{ footerContent }}</p>
+      <p v-else>© 2024 CloudHost 云主机管理平台 | 技术支持</p>
     </footer>
   </div>
 </template>
@@ -116,6 +118,46 @@ import {
 
 const router = useRouter()
 const userStore = useUserStore()
+
+// Footer config from backend
+const siteName = ref()
+const siteTitle = ref()
+const footerContent = ref()
+
+const fetchFooterConfig = async () => {
+  try {
+    const { request } = await import('@/utils/request')
+    const token = localStorage.getItem('token')
+    const res = await request.get('/admin/configs', {
+      headers: token ? { Authorization: 'Bearer ' + token } : {}
+    })
+    if (res.data && res.data.list) {
+      const configs = res.data.list.reduce((acc, item) => {
+        acc[item.key] = item.value
+        return acc
+      }, {})
+      siteName.value = configs.site_name || ''
+      siteTitle.value = configs.site_title || ''
+      footerContent.value = configs.footer_content || ''
+    }
+  } catch (e) {
+    // If admin config fails, try public config
+    try {
+      const res = await request.get('/admin/configs')
+      if (res.data && res.data.list) {
+        const configs = res.data.list.reduce((acc, item) => {
+          acc[item.key] = item.value
+          return acc
+        }, {})
+        siteName.value = configs.site_name || ''
+        siteTitle.value = configs.site_title || ''
+        footerContent.value = configs.footer_content || ''
+      }
+    } catch (e2) {
+      // Use defaults
+    }
+  }
+}
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 const isAdmin = computed(() => userStore.isAdmin)

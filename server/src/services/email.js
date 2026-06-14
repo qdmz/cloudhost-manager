@@ -1,219 +1,229 @@
+/**
+ * 邮件发送服务 - 支持模板
+ */
+
 const nodemailer = require('nodemailer')
-const { Config } = require('../models')
+const path = require('path')
+const fs = require('fs')
+const dayjs = require('dayjs')
 
-let transporter = null
+class EmailService {
+  constructor() {
+    this.transporter = null
+    this.templates = {}
+    this.initTransporter()
+    this.loadTemplates()
+  }
 
-const initTransporter = async () => {
-  try {
-    const configs = await Config.findAll()
-    const configMap = {}
-    configs.forEach(c => {
-      try {
-        configMap[c.key] = c.type === 'json' ? JSON.parse(c.value) : c.value
-      } catch {
-        configMap[c.key] = c.value
-      }
-    })
-    
-    const smtpHost = configMap.smtp_host || process.env.SMTP_HOST
-    const smtpPort = configMap.smtp_port || process.env.SMTP_PORT
-    const smtpUser = configMap.smtp_user || process.env.SMTP_USER
-    const smtpPass = configMap.smtp_pass || process.env.SMTP_PASS
-    let smtpSecure = false
-    if (configMap.smtp_secure !== undefined) {
-      smtpSecure = configMap.smtp_secure === true || configMap.smtp_secure === 'true'
-    } else if (process.env.SMTP_SECURE) {
-      smtpSecure = process.env.SMTP_SECURE === true || process.env.SMTP_SECURE === 'true'
-    }
-    
-    if (smtpHost && smtpUser) {
-      transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: parseInt(smtpPort) || 465,
-        secure: smtpSecure,
-        auth: { user: smtpUser, pass: smtpPass }
+  initTransporter() {
+    try {
+      this.transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'smtp.qq.com',
+        port: parseInt(process.env.SMTP_PORT) || 465,
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: {
+          user: process.env.SMTP_USER || '',
+          pass: process.env.SMTP_PASS || ''
+        }
       })
-      console.log('[Email] Transporter initialized with host: ' + smtpHost)
-    } else {
-      console.log('[Email] SMTP not configured, will log emails instead')
+    } catch (error) {
+      console.error('[Email] Transporter init failed:', error.message)
     }
-  } catch (error) {
-    console.error('[Email] Failed to initialize transporter:', error)
   }
-}
 
-const getConfig = async () => {
-  try {
-    const configs = await Config.findAll()
-    const configMap = {}
-    configs.forEach(c => {
-      try {
-        configMap[c.key] = c.type === 'json' ? JSON.parse(c.value) : c.value
-      } catch {
-        configMap[c.key] = c.value
+  loadTemplates() {
+    // 内置邮件模板
+    this.templates = {
+      email_verify: {
+        subject: '邮箱验证 - CloudHost',
+        html: (data) => `
+          <div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">
+            <h2 style="color:#1890ff;">邮箱验证</h2>
+            <p>您正在验证邮箱 ${data.email}，请输入以下验证码：</p>
+            <div style="text-align:center;padding:20px;background:#f0f5ff;border-radius:8px;margin:20px 0;">
+              <span style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#1890ff;">${data.code}</span>
+            </div>
+            <p>验证码有效期为 10 分钟，请尽快验证。</p>
+            <p style="color:#999;font-size:12px;">如果您没有请求验证邮箱，请忽略此邮件。</p>
+          </div>`
+      },
+      password_reset: {
+        subject: '重置密码 - CloudHost',
+        html: (data) => `
+          <div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">
+            <h2 style="color:#1890ff;">重置密码</h2>
+            <p>您正在重置 CloudHost 账户密码。</p>
+            <div style="text-align:center;padding:20px;background:#f0f5ff;border-radius:8px;margin:20px 0;">
+              <a href="${data.resetUrl}" style="display:inline-block;padding:12px 30px;background:#1890ff;color:#fff;text-decoration:none;border-radius:4px;">重置密码</a>
+            </div>
+            <p>链接有效期为 30 分钟，请尽快操作。</p>
+            <p style="color:#999;font-size:12px;">如果您没有请求重置密码，请忽略此邮件。</p>
+          </div>`
+      },
+      login_notify: {
+        subject: '登录通知 - CloudHost',
+        html: (data) => `
+          <div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">
+            <h2 style="color:#52c41a;">登录通知</h2>
+            <p>您的账户 ${data.email} 于 ${data.time} 成功登录。</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              <tr><td style="padding:8px;border:1px solid #eee;">登录地点</td><td style="padding:8px;border:1px solid #eee;">${data.location || '未知'}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">IP 地址</td><td style="padding:8px;border:1px solid #eee;">${data.ip || '未知'}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">浏览器</td><td style="padding:8px;border:1px solid #eee;">${data.browser || '未知'}</td></tr>
+            </table>
+            <p style="color:#999;font-size:12px;">如非本人操作，请立即修改密码。</p>
+          </div>`
+      },
+      order_notify: {
+        subject: '订单通知 - CloudHost',
+        html: (data) => `
+          <div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">
+            <h2 style="color:#1890ff;">订单通知</h2>
+            <p>您的订单 <strong>${data.orderNo}</strong> 已${data.status}。</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              <tr><td style="padding:8px;border:1px solid #eee;">商品</td><td style="padding:8px;border:1px solid #eee;">${data.productName}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">配置</td><td style="padding:8px;border:1px solid #eee;">${data.planName}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">金额</td><td style="padding:8px;border:1px solid #eee;">¥${data.amount}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">时间</td><td style="padding:8px;border:1px solid #eee;">${data.time}</td></tr>
+            </table>
+          </div>`
+      },
+      product_activated: {
+        subject: '服务已开通 - CloudHost',
+        html: (data) => `
+          <div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">
+            <h2 style="color:#52c41a;">服务已开通</h2>
+            <p>您的服务 <strong>${data.serviceName}</strong> 已开通成功！</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              <tr><td style="padding:8px;border:1px solid #eee;">服务器 IP</td><td style="padding:8px;border:1px solid #eee;">${data.ipv4 || '—'}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">IPv6</td><td style="padding:8px;border:1px solid #eee;">${data.ipv6 || '—'}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">SSH 命令</td><td style="padding:8px;border:1px solid #eee;">ssh root@${data.ipv4}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">密码</td><td style="padding:8px;border:1px solid #eee;">${data.password || '—'}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">到期时间</td><td style="padding:8px;border:1px solid #eee;">${data.expireTime}</td></tr>
+            </table>
+            <p style="color:#999;font-size:12px;">请及时登录控制台管理您的服务。</p>
+          </div>`
+      },
+      expiration_reminder: {
+        subject: '到期提醒 - CloudHost',
+        html: (data) => `
+          <div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">
+            <h2 style="color:#faad14;">服务到期提醒</h2>
+            <p>您的服务 <strong>${data.serviceName}</strong> 将在 <strong>${data.daysLeft} 天</strong> 后到期。</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              <tr><td style="padding:8px;border:1px solid #eee;">到期时间</td><td style="padding:8px;border:1px solid #eee;">${data.expireTime}</td></tr>
+              <tr><td style="padding:8px;border:1px solid #eee;">服务器 IP</td><td style="padding:8px;border:1px solid #eee;">${data.ipv4 || '—'}</td></tr>
+            </table>
+            <p>请及时续费，以免影响服务使用。</p>
+          </div>`
+      },
+      order_expire: {
+        subject: '服务已到期 - CloudHost',
+        html: (data) => `
+          <div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">
+            <h2 style="color:#ff4d4f;">服务已到期</h2>
+            <p>您的服务 <strong>${data.serviceName}</strong> 已于 ${data.expireTime} 到期。</p>
+            <p>请尽快续费以继续使用您的服务。</p>
+          </div>`
       }
-    })
-    return configMap
-  } catch {
-    return {}
+    }
   }
-}
 
-// Email template system
-const emailTemplates = {}
+  // 获取所有模板
+  getTemplates() {
+    return Object.keys(this.templates).map(key => ({
+      key,
+      name: key,
+      subject: this.templates[key].subject
+    }))
+  }
 
-emailTemplates.order_confirmation = {
-  subject: '订单确认 - {site_name}',
-  getText: (v) => {
-    return '订单号: ' + v.order_no + '\n金额: ¥' + v.amount + '\n产品: ' + v.product_name + '\n配置: ' + v.plan_name + '\n支付方式: ' + v.payment_method + '\n\n感谢您的使用！'
-  },
-  getHtml: (v) => {
-    return '<div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">' +
-      '<h2 style="color:#1890ff;">订单确认</h2>' +
-      '<p>您好 ' + (v.username || '') + '，</p>' +
-      '<p>您的订单已成功创建：</p>' +
-      '<table style="border-collapse:collapse;width:100%;margin:15px 0;">' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>订单号</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.order_no + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>金额</strong></td><td style="padding:8px;border:1px solid #ddd;">¥' + v.amount + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>产品</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.product_name + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>配置</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.plan_name + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>支付方式</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.payment_method + '</td></tr>' +
-      '</table>' +
-      '<p>感谢您的使用！</p>' +
-      '<p style="color:#999;font-size:12px;">—— ' + (v.site_name || 'CloudHost') + '</p>' +
-    '</div>'
+  // 根据模板 key 和变量生成 HTML
+  renderTemplate(key, data) {
+    const template = this.templates[key]
+    if (!template) {
+      throw new Error(`模板不存在: ${key}`)
+    }
+    return {
+      subject: template.subject,
+      html: template.html(data)
+    }
   }
-}
 
-emailTemplates.payment_success = {
-  subject: '支付成功 - {site_name}',
-  getText: (v) => {
-    return '订单号: ' + v.order_no + '\n支付金额: ¥' + v.amount + '\n支付方式: ' + v.payment_method + '\n\n感谢您的使用！'
-  },
-  getHtml: (v) => {
-    return '<div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">' +
-      '<h2 style="color:#52c41a;">支付成功</h2>' +
-      '<p>您好 ' + (v.username || '') + '，</p>' +
-      '<p>您的订单支付已成功：</p>' +
-      '<table style="border-collapse:collapse;width:100%;margin:15px 0;">' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>订单号</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.order_no + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>支付金额</strong></td><td style="padding:8px;border:1px solid #ddd;">¥' + v.amount + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>支付方式</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.payment_method + '</td></tr>' +
-      '</table>' +
-      '<p>感谢您的使用！</p>' +
-      '<p style="color:#999;font-size:12px;">—— ' + (v.site_name || 'CloudHost') + '</p>' +
-    '</div>'
-  }
-}
+  // 发送模板邮件
+  async sendTemplate(to, templateKey, data) {
+    try {
+      const { subject, html } = this.renderTemplate(templateKey, data)
+      
+      if (!this.transporter) {
+        this.initTransporter()
+        if (!this.transporter) throw new Error('邮件服务未配置')
+      }
 
-emailTemplates.service_activation = {
-  subject: '服务已激活 - {site_name}',
-  getText: (v) => {
-    return '服务名称: ' + v.service_name + '\nIP地址: ' + v.ip_address + '\n用户名: ' + v.username + '\n到期时间: ' + v.expire_time + '\n\n请妥善保管您的登录信息！'
-  },
-  getHtml: (v) => {
-    return '<div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">' +
-      '<h2 style="color:#faad14;">服务已激活</h2>' +
-      '<p>您好 ' + (v.user_name || v.username || '') + '，</p>' +
-      '<p>您的服务已成功激活：</p>' +
-      '<table style="border-collapse:collapse;width:100%;margin:15px 0;">' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>服务名称</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.service_name + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>IP地址</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.ip_address + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>用户名</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.username + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>到期时间</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.expire_time + '</td></tr>' +
-      '</table>' +
-      '<p>请妥善保管您的登录信息！</p>' +
-      '<p style="color:#999;font-size:12px;">—— ' + (v.site_name || 'CloudHost') + '</p>' +
-    '</div>'
-  }
-}
+      const info = await this.transporter.sendMail({
+        from: `"CloudHost" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+        to,
+        subject,
+        html
+      })
 
-emailTemplates.password_reset = {
-  subject: '密码重置 - {site_name}',
-  getText: (v) => {
-    return '您的密码已成功重置。\n新密码: ' + v.new_password + '\n\n如果不是您本人操作，请立即联系管理员。'
-  },
-  getHtml: (v) => {
-    return '<div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">' +
-      '<h2 style="color:#722ed1;">密码重置</h2>' +
-      '<p>您好 ' + (v.username || '') + '，</p>' +
-      '<p>您的密码已成功重置：</p>' +
-      '<p><strong>新密码：</strong><code style="background:#f5f5f5;padding:2px 8px;border-radius:4px;">' + v.new_password + '</code></p>' +
-      '<p style="color:#ff4d4f;">如果不是您本人操作，请立即联系管理员。</p>' +
-      '<p style="color:#999;font-size:12px;">—— ' + (v.site_name || 'CloudHost') + '</p>' +
-    '</div>'
+      console.log('[Email] Template sent:', templateKey, 'to', to)
+      return { success: true, messageId: info.messageId }
+    } catch (error) {
+      console.error('[Email] Send template error:', error.message)
+      throw new Error('发送失败: ' + error.message)
+    }
   }
-}
 
-emailTemplates.voucher_redemption = {
-  subject: '代金券兑换成功 - {site_name}',
-  getText: (v) => {
-    return '代金券编号: ' + v.voucher_code + '\n兑换金额: ¥' + v.amount + '\n余额: ¥' + v.balance + '\n\n感谢您的使用！'
-  },
-  getHtml: (v) => {
-    return '<div style="max-width:600px;margin:0 auto;padding:20px;font-family:sans-serif;">' +
-      '<h2 style="color:#1890ff;">代金券兑换成功</h2>' +
-      '<p>您好 ' + (v.username || '') + '，</p>' +
-      '<p>您的代金券兑换成功：</p>' +
-      '<table style="border-collapse:collapse;width:100%;margin:15px 0;">' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>代金券编号</strong></td><td style="padding:8px;border:1px solid #ddd;">' + v.voucher_code + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>兑换金额</strong></td><td style="padding:8px;border:1px solid #ddd;">¥' + v.amount + '</td></tr>' +
-        '<tr><td style="padding:8px;border:1px solid #ddd;"><strong>当前余额</strong></td><td style="padding:8px;border:1px solid #ddd;">¥' + v.balance + '</td></tr>' +
-      '</table>' +
-      '<p>感谢您的使用！</p>' +
-      '<p style="color:#999;font-size:12px;">—— ' + (v.site_name || 'CloudHost') + '</p>' +
-    '</div>'
-  }
-}
+  // 发送普通邮件
+  async send(to, subject, html) {
+    try {
+      if (!this.transporter) {
+        this.initTransporter()
+        if (!this.transporter) throw new Error('邮件服务未配置')
+      }
 
-const renderTemplate = (templateName, variables) => {
-  const template = emailTemplates[templateName]
-  if (!template) {
-    return { subject: '通知', text: '', html: '' }
-  }
-  const siteName = variables.site_name || 'CloudHost'
-  let subject = template.subject.replace('{site_name}', siteName)
-  let text = template.getText(variables).replace(/{site_name}/g, siteName)
-  let html = template.getHtml(variables).replace(/{site_name}/g, siteName)
-  return { subject, text, html }
-}
+      const info = await this.transporter.sendMail({
+        from: `"CloudHost" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+        to,
+        subject,
+        html
+      })
 
-const sendEmail = async (to, subject, text, html) => {
-  if (!transporter) {
-    await initTransporter()
+      console.log('[Email] Sent to:', to)
+      return { success: true, messageId: info.messageId }
+    } catch (error) {
+      console.error('[Email] Send error:', error.message)
+      throw new Error('发送失败: ' + error.message)
+    }
   }
-  
-  if (!transporter) {
-    console.log('[Email] ' + to + ' - ' + subject + ': ' + text)
-    return true
-  }
-  
-  try {
-    const config = await getConfig()
-    const fromEmail = config.smtp_from || process.env.SMTP_FROM || config.smtp_user || process.env.SMTP_USER
+
+  // 测试 SMTP 连接
+  async testConnection() {
+    if (!this.transporter) {
+      this.initTransporter()
+    }
+    if (!this.transporter) throw new Error('邮件服务未配置')
     
-    await transporter.sendMail({
-      from: fromEmail,
-      to: to,
-      subject: subject,
-      text: text,
-      html: html || text.replace(/\n/g, '<br>')
-    })
-    
-    console.log('[Email] Sent to ' + to + ': ' + subject)
-    return true
-  } catch (error) {
-    console.error('Email send failed:', error)
-    return false
+    try {
+      await this.transporter.verify()
+      return { success: true, message: 'SMTP 连接成功' }
+    } catch (error) {
+      return { success: false, message: error.message }
+    }
+  }
+
+  // 添加自定义模板
+  addTemplate(key, subject, htmlFn) {
+    this.templates[key] = { subject, html: htmlFn }
   }
 }
 
-const sendTemplateEmail = async (to, templateName, variables) => {
-  const { subject, text, html } = renderTemplate(templateName, variables)
-  return await sendEmail(to, subject, text, html)
-}
+module.exports = new EmailService()
 
-// 初始化时尝试读取配置
-initTransporter()
+// Alias for backward compatibility
+module.exports.emailTemplates = new EmailService().templates
+module.exports.sendTemplateEmail = (to, key, data) => { const s = new EmailService(); return s.sendTemplate(to, key, data) }
+module.exports.sendEmail = (to, subject, html) => { const s = new EmailService(); return s.send(to, subject, html) }
+module.exports.initTransporter = (cfg) => { const s = new EmailService(); return s.initTransporter() }
 
-module.exports = { sendEmail, sendTemplateEmail, initTransporter, renderTemplate, emailTemplates }

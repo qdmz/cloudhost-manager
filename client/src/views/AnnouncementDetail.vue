@@ -7,7 +7,7 @@
         <a-tag v-if="announcement.is_important" color="orange">重要</a-tag>
         <h1>{{ announcement.title }}</h1>
         <div class="meta">
-          <span><CalendarOutlined /> {{ formatDate(announcement.created_at) }}</span>
+          <span><CalendarOutlined /> {{ formatDate(announcement.createdAt) }}</span>
           <span><EyeOutlined /> {{ announcement.views || 0 }} 次阅读</span>
         </div>
       </div>

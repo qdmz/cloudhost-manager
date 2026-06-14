@@ -71,7 +71,6 @@
             </a-form-item>
           </a-col>
         </a-row>
-      </a-form>
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="默认节点">
@@ -100,8 +99,7 @@
       </a-form>
     </a-modal>
     
-    <a-modal v-model:open="plansModalVisible"
-     title="管理配置方案" width="800px">
+    <a-modal v-model:open="plansModalVisible" title="管理配置方案" width="800px">
       <div style="margin-bottom: 16px;">
         <a-button type="primary" @click="openAddPlanModal">
           <PlusOutlined /> 添加配置方案
@@ -183,6 +181,7 @@ import { ref, onMounted, reactive } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { getProducts, createProduct, updateProduct, deleteProduct, getPlans, createPlan, updatePlan, deletePlan } from '@/api/admin'
+import { getNodes } from '@/api/product'
 
 const loading = ref(false)
 const products = ref([])
@@ -222,7 +221,7 @@ const osOptions = ref([
 const fetchAvailableNodes = async () => {
   try {
     const res = await getNodes({ status: 'online' })
-    availableNodes.value = res.data?.list || []
+    availableNodes.value = Array.isArray(res.data) ? res.data : (res.data?.list || [])
   } catch (error) {
     console.error('Failed to fetch nodes:', error)
   }
@@ -288,7 +287,21 @@ const openAddModal = () => {
 
 const openEditModal = (product) => {
   editingProductId.value = product.id
-  Object.assign(productForm, product)
+  Object.assign(productForm, {
+    name: product.name || '',
+    type: product.type || 'kvm',
+    description: product.description || '',
+    features: product.features || '',
+    cpu_range: product.cpu_range || '1-8',
+    memory_range: product.memory_range || '512-16384',
+    disk_range: product.disk_range || '10-500',
+    status: product.status || 'online',
+    node_id: product.node_id || null,
+    default_type: product.default_type || 'kvm',
+    default_os: product.default_os || 'ubuntu-22.04'
+  })
+  // Fetch available nodes when editing
+  fetchAvailableNodes()
   addModalVisible.value = true
 }
 

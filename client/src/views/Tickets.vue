@@ -16,7 +16,7 @@
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'title'">
-          <router-link :to="`/ticket/${record.id}`">{{ record.title }}</router-link>
+          <router-link :to="`/tickets/${record.id}`">{{ record.title }}</router-link>
         </template>
         <template v-else-if="column.key === 'category'">
           {{ getCategoryText(record.category) }}
@@ -24,11 +24,11 @@
         <template v-else-if="column.key === 'status'">
           <a-tag :color="getStatusColor(record.status)">{{ getStatusText(record.status) }}</a-tag>
         </template>
-        <template v-else-if="column.key === 'created_at'">
-          {{ formatDate(record.created_at) }}
+        <template v-else-if="column.key === 'createdAt'">
+          {{ formatDate(record.createdAt) }}
         </template>
         <template v-else-if="column.key === 'action'">
-          <router-link :to="`/ticket/${record.id}`">
+          <router-link :to="`/tickets/${record.id}`">
             <a-button size="small">查看详情</a-button>
           </router-link>
         </template>
@@ -88,7 +88,7 @@ const columns = [
   { title: '工单标题', key: 'title' },
   { title: '类别', key: 'category' },
   { title: '状态', key: 'status' },
-  { title: '创建时间', key: 'created_at' },
+  { title: '创建时间', key: 'createdAt' },
   { title: '操作', key: 'action' }
 ]
 

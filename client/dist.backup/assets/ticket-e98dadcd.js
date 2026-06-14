@@ -1,0 +1,1 @@
+import{q as e}from"./index-94dabc8d.js";const o=t=>e.get("/tickets",{params:t}),i=t=>e.get(`/tickets/${t}`),k=t=>e.post("/tickets",t),a=(t,s)=>e.post(`/tickets/${t}/reply`,s),r=t=>e.post(`/tickets/${t}/close`);export{i as a,r as b,k as c,o as g,a as r};

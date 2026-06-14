@@ -4,7 +4,7 @@
     <template v-else-if="service">
       <div class="page-header">
         <div class="header-left">
-          <a-button @click="$router.push('/my-services')">
+          <a-button @click="$router.push('/services')">
             <ArrowLeftOutlined /> 返回
           </a-button>
           <h1>{{ service.name }}</h1>
@@ -29,7 +29,43 @@
             <div class="card-title">服务信息</div>
             <a-descriptions :column="2" bordered>
               <a-descriptions-item label="服务器ID">{{ service.id }}</a-descriptions-item>
-              <a-descriptions-item label="节点">{{ service.node_name }}</a-descriptions-item>
+              <a-descriptions-item label="端口信息" :span="2">
+                <template v-if="service.node">
+                  <div style="line-height:1.8">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+                      <a-tag color="blue">
+                        <Icon type="md-cloud" /> {{ service.node.name }}
+                      </a-tag>
+                      <a-tag color="default">
+                        {{ service.node?.ssh_host || service.ssh_host || 'pve.ypvps.com' }}
+                      </a-tag>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                      <a-tag v-if="service.ssh_port" color="green" @click="copyToClipboard((service.node?.ssh_host || service.ssh_host || 'pve.ypvps.com') + ':' + service.ssh_port + ' root@' + (service.node?.ssh_host || service.ssh_host || 'pve.ypvps.com') + ' -p ' + service.ssh_port, 'SSH连接')" style="cursor:pointer" title="点击复制SSH命令">
+                        🖥 SSH:{{ service.ssh_port }}
+                      </a-tag>
+                      <a-tag v-if="service.http_port" color="cyan">
+                        🌐 HTTP:{{ service.http_port }}
+                      </a-tag>
+                      <a-tag v-if="service.https_port" color="purple">
+                        🔒 HTTPS:{{ service.https_port }}
+                      </a-tag>
+                      <a-tag v-if="service.vnc_port" color="orange" @click="copyToClipboard((service.node?.ssh_host || service.ssh_host || 'pve.ypvps.com') + ':' + service.vnc_port + ' (VNC)', 'VNC')" style="cursor:pointer" title="点击复制VNC信息">
+                        🖱 VNC:{{ service.vnc_port }}
+                      </a-tag>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+                      <a-tag v-if="service.ipv4" color="default">
+                        📍 {{ service.ipv4 }}
+                      </a-tag>
+                      <a-tag v-if="service.custom_ports && service.custom_ports.length" color="geekblue">
+                        🔧 {{ service.custom_ports.length }}个自定义
+                      </a-tag>
+                    </div>
+                  </div>
+                </template>
+                <span v-else>未分配</span>
+              </a-descriptions-item>
               <a-descriptions-item label="IP地址">{{ service.ipv4 || '未分配' }}</a-descriptions-item>
               <a-descriptions-item label="IPv6地址">{{ service.ipv6 || '未分配' }}</a-descriptions-item>
               <a-descriptions-item label="CPU">{{ service.cpu }} 核心</a-descriptions-item>
@@ -156,6 +192,7 @@
         <a-form-item label="支付方式">
           <a-radio-group v-model:value="renewForm.payment_method">
             <a-radio value="balance">余额支付</a-radio>
+            <a-radio value="qqpay">QQ钱包</a-radio>
             <a-radio value="alipay">支付宝</a-radio>
             <a-radio value="wechat">微信支付</a-radio>
           </a-radio-group>
@@ -169,12 +206,80 @@
         <a-button @click="showRenewModal = false">取消</a-button>
         <a-button type="primary" @click="handleRenew">确认续费</a-button>
       </template>
-    </a-modal>
+    
+    
+    <!-- SSH Connection Info Modal -->
+    <a-modal
+      v-model:open="showSshModal"
+      title="SSH/SFTP 连接信息"
+      width="600px"
+      :footer="null"
+    >
+      <div v-if="sshConnectionInfo">
+        <a-alert type="info" show-icon style="margin-bottom:16px">
+          <template #message>SSH 连接信息</template>
+          <template #description>
+            请使用以下信息通过 SSH 客户端（如 PuTTY、Xshell、MobileSSHD 等）连接您的虚拟机
+          </template>
+        </a-alert>
+        
+        <a-descriptions :column="1" bordered size="small" style="margin-bottom:16px">
+          <a-descriptions-item label="主机地址">
+            <a :copyable="{ text: sshConnectionInfo.host }">{{ sshConnectionInfo.host }}</a>
+          </a-descriptions-item>
+          <a-descriptions-item label="SSH 端口">
+            {{ sshConnectionInfo.port }}
+          </a-descriptions-item>
+          <a-descriptions-item label="用户名">
+            {{ sshConnectionInfo.user }}
+          </a-descriptions-item>
+          <a-descriptions-item v-if="sshConnectionInfo.password" label="密码">
+            <a :copyable="{ text: sshConnectionInfo.password }">{{ sshConnectionInfo.password }}</a>
+          </a-descriptions-item>
+          <a-descriptions-item v-else label="密码">
+            <a-tag color="default">节点默认密码</a-tag>
+          </a-descriptions-item>
+        </a-descriptions>
+        
+        <a-divider />
+        
+        <div style="margin-bottom:8px"><strong>快捷连接命令:</strong></div>
+        <div style="background:#1e1e1e;padding:12px;border-radius:6px;margin-bottom:16px">
+          <code style="color:#4ec9b0;font-size:14px">{{ sshConnectionInfo.command }}</code>
+        </div>
+        
+        <a-button type="primary" block @click="copyToClipboard(sshConnectionInfo.command, 'SSH 命令')">
+          <CopyOutlined /> 复制连接命令
+        </a-button>
+        
+        <a-divider />
+        
+        <div style="margin-bottom:8px"><strong>SFTP 连接:</strong></div>
+        <div style="background:#1e1e1e;padding:12px;border-radius:6px;margin-bottom:16px">
+          <code style="color:#4ec9b0;font-size:14px">{{ sshConnectionInfo.sftpCmd }}</code>
+        </div>
+        <a-button block @click="copyToClipboard(sshConnectionInfo.sftpCmd, 'SFTP 命令')">
+          <CopyOutlined /> 复制 SFTP 命令
+        </a-button>
+        
+        <a-divider />
+        
+        <div>
+          <a href="https://www.putty.org/" target="_blank" style="margin-right:16px">
+            <DownloadOutlined /> 下载 PuTTY (Windows)
+          </a>
+          <a href="https://apps.apple.com/app/xshell/id943624443" target="_blank">
+            <MobileOutlined /> 下载 Xshell (iOS/Android)
+          </a>
+        </div>
+      </div>
+    </a-modal></a-modal>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
 import { getService, startService, stopService, restartService, resetPassword, reinstallSystem, renewService, getServiceStats } from '@/api/service'
 import { message } from 'ant-design-vue'
@@ -189,7 +294,9 @@ import {
   KeyOutlined,
   SyncOutlined,
   ClockCircleOutlined,
-  DollarOutlined
+  DollarOutlined,
+  ThunderboltOutlined,
+  FolderOpenOutlined
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -197,6 +304,10 @@ const router = useRouter()
 
 const loading = ref(false)
 const service = ref(null)
+
+// SSH connection info modal
+const showSshModal = ref(false)
+const sshConnectionInfo = ref(null)
 const stats = ref({ cpu: 0, memory: 0, disk: 0 })
 const showResetPasswordModal = ref(false)
 const showReinstallModal = ref(false)
@@ -213,8 +324,11 @@ const isExpiringSoon = computed(() => {
 })
 
 const renewPrice = computed(() => {
-  return renewForm.value.cycle === 'monthly' ? 50 :
-         renewForm.value.cycle === 'quarterly' ? 140 : 480
+  if (!service.value || !service.value.price) return 0
+  const basePrice = parseFloat(service.value.price) || 0
+  if (renewForm.value.cycle === 'yearly') return basePrice * 12 * 0.9
+  if (renewForm.value.cycle === 'quarterly') return basePrice * 3 * 0.95
+  return basePrice
 })
 
 const newExpireDate = computed(() => {
@@ -235,6 +349,29 @@ const getStatusText = (status) => {
 }
 
 const formatDate = (date) => dayjs(date).format('YYYY-MM-DD HH:mm')
+
+const getNodeDisplay = () => {
+  if (!service.value) return ''
+  const nodeName = (service.node && service.node.name) || service.node_name || ''
+  if (!nodeName) return '未分配'
+  const isDomain = /^[\w.-]+$/.test(nodeName) && (nodeName.includes('.') || /^[\d.]+$/.test(nodeName))
+  if (isDomain) return nodeName
+  return nodeName
+}
+
+const getNodeSSH = () => {
+  if (!service.value) return 'N/A'
+  const nodeName = (service.node && service.node.name) || service.node_name || ''
+  if (!nodeName) return 'N/A'
+  const isDomain = /^[\w.-]+$/.test(nodeName) && (nodeName.includes('.') || /^[\d.]+$/.test(nodeName))
+  if (isDomain) {
+    const sshPort = service.ssh_port || 22
+    return nodeName + ':' + sshPort
+  }
+  const addr = service.ipv4 || 'N/A'
+  const sshPort = service.ssh_port || 22
+  return addr + ':' + sshPort
+}
 
 const fetchService = async () => {
   loading.value = true
@@ -261,7 +398,30 @@ const fetchStats = async () => {
 const handleAction = async (action) => {
   try {
     if (action === 'vnc') {
-      window.open(`#/vnc/${service.value.id}`, '_blank')
+      if (!service.value?.ipv4) {
+        message.warning('IP地址未分配')
+        return
+      }
+      // Use PVE spiceproxy for VNC - this works through PVE's web interface
+      if (service.value.node?.id) {
+        message.loading({ content: '正在打开VNC控制台...', duration: 0 })
+        const resp = await axios.post(`/api/vm/vncproxy/${service.value.node_id}/${service.value.vmid}`, {
+          username: 'root@pam'
+        })
+        message.destroy()
+        if (resp.data && resp.data.data) {
+          // Open PVE VNC console
+          window.open(`https://${service.value.node.ssh_host || window.location.hostname}:8006/vnc.html?server=${service.value.node.ssh_host}&port=8006&vnccoinfo=${encodeURIComponent(JSON.stringify(resp.data.data))}`, '_blank')
+        } else {
+          // Fallback: open PVE node page
+          window.open(`https://${service.value.node.ssh_host || window.location.hostname}:8006/`, '_blank')
+        }
+      }
+      return
+    }
+    
+    if (action === 'ssh') {
+      openWebSSH()
       return
     }
     
@@ -304,14 +464,111 @@ const handleReinstall = async () => {
 }
 
 const handleRenew = async () => {
-  try {
-    await renewService(route.params.id, renewForm.value)
-    message.success('续费成功')
-    showRenewModal.value = false
-    fetchService()
-  } catch (error) {
-    message.error(error.message)
+  if (renewForm.value.payment_method === 'balance') {
+    try {
+      const res = await renewService(route.params.id, {
+        cycle: renewForm.value.cycle,
+        payment_method: 'balance'
+      })
+      if (res.data && res.data.message) {
+        message.success(res.data.message)
+      } else {
+        message.success('续费成功')
+      }
+    } catch (error) {
+      message.error(error.message)
+    }
+  } else {
+    try {
+      const res = await renewService(route.params.id, {
+        cycle: renewForm.value.cycle,
+        payment_method: renewForm.value.payment_method
+      })
+      if (res.data && res.data.data && res.data.data.pay_url) {
+        // 有支付链接，跳转到易支付页面
+        window.location.href = res.data.data.pay_url
+      } else if (res.data && res.data.data) {
+        message.success('已创建续费订单，金额 ¥' + res.data.data.amount + '，请前往订单页支付')
+      } else {
+        message.success('续费成功')
+      }
+    } catch (error) {
+      message.error(error.message)
+    }
   }
+  showRenewModal.value = false
+  fetchService()
+}
+
+
+const openWebSSH = () => {
+  if (!service.value?.ipv4) {
+    message.warning('IP地址未分配')
+    return
+  }
+  const sshHost = service.value.ssh_host || service.value.ipv4
+  const sshPort = service.value.ssh_port || 22
+  const user = service.value.ssh_username || 'root'
+  const password = service.value.ssh_password || ''
+  
+  // Build SSH command for clipboard copy
+  const sshCmd = `ssh ${user}@${sshHost} -p ${sshPort}`
+  
+  // Try to open web terminal first
+  // Check if websockify is available on this host
+  const wsUrl = `wss://${window.location.hostname}:${window.location.port || 443}/ws/ssh/${service.value.id}`
+  
+  // Fallback: copy SSH command and show connection info
+  if (password) {
+    message.success('已复制 SSH 连接命令到剪贴板，请在终端中粘贴执行')
+    navigator.clipboard.writeText(sshCmd).catch(() => {})
+  } else {
+    message.success('已复制 SSH 连接命令到剪贴板')
+    navigator.clipboard.writeText(sshCmd).catch(() => {})
+  }
+  
+  // Open a modal with connection info
+  sshConnectionInfo.value = {
+    command: sshCmd,
+    host: sshHost,
+    port: sshPort,
+    user: user,
+    password: password,
+    sftpCmd: `sftp ${user}@${sshHost} -P ${sshPort}`,
+    vncCmd: password ? `vnc://<node-ip>[:port]` : '需要通过PVE控制台访问'
+  }
+  showSshModal.value = true
+}
+
+const openSFTP = () => {
+  openWebSSH()
+}
+
+const openVNC = () => {
+  if (!service.value?.ipv4) {
+    message.warning('IP地址未分配')
+    return
+  }
+  // VNC is accessible via the node's websockify service
+  const sshHost = service.value.ssh_host || service.value.node?.ssh_host
+  const sshPort = service.value.ssh_port || 22
+  // Try connecting via node:port (port mapped to VM's VNC)
+  window.open(`//${window.location.hostname}:${window.location.port || 80}/vnc/?host=${sshHost}&port=${sshPort + 5900}`, '_blank')
+}
+
+const copyToClipboard = (text, label) => {
+  navigator.clipboard.writeText(text).then(() => {
+    message.success(label + ' 已复制到剪贴板')
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    message.success(label + ' 已复制')
+  })
 }
 
 const syncService = async () => {

@@ -57,13 +57,7 @@
           <a-input-number v-model:value="orderForm.quantity" :min="1" :max="10" />
         </a-form-item>
         
-        <a-form-item label="选择节点" name="node_id">
-          <a-select v-model:value="orderForm.node_id" placeholder="请选择节点">
-            <a-select-option v-for="node in nodes" :key="node.id" :value="node.id">
-              {{ node.name }} ({{ node.location }})
-            </a-select-option>
-          </a-select>
-        </a-form-item>
+        <a-alert message="节点由系统自动分配" type="info" show-icon style="margin-bottom:16px" />
         
         <div class="order-summary">
           <div class="summary-row">
@@ -162,14 +156,14 @@ const handleOrder = async () => {
     message.warning('请选择配置方案')
     return
   }
-  if (!orderForm.value.node_id) {
-    message.warning('请选择节点')
-    return
-  }
-  
   orderLoading.value = true
   try {
-    const res = await createOrder(orderForm.value)
+    // Auto-select first available node
+    const orderData = { ...orderForm.value }
+    if (nodes.value.length > 0) {
+      orderData.node_id = nodes.value[0].id
+    }
+    const res = await createOrder(orderData)
     message.success('订单创建成功')
     orderModalVisible.value = false
     // 跳转到订单页面

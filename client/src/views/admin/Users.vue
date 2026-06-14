@@ -120,7 +120,7 @@ const columns = [
   { title: '余额', key: 'balance' },
   { title: '状态', key: 'status' },
   { title: '实名', key: 'auth' },
-  { title: '注册时间', dataIndex: 'created_at' },
+  { title: '注册时间', dataIndex: 'createdAt' },
   { title: '操作', key: 'action', width: 280 }
 ]
 

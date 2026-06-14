@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken')
+require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '..', '.env') })
 const { User } = require('../models')
 
 const auth = async (req, res, next) => {
@@ -10,7 +11,7 @@ const auth = async (req, res, next) => {
     }
     
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    const user = await User.findByPk(decoded.id)
+    const user = await User.findByPk(decoded.userId)
     
     if (!user) {
       return res.status(401).json({ code: 401, message: '用户不存在' })
@@ -24,6 +25,7 @@ const auth = async (req, res, next) => {
     req.userId = user.id
     next()
   } catch (error) {
+    console.error('[AUTH] Error:', error.message, error.stack)
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ code: 401, message: '登录已过期' })
     }
@@ -44,7 +46,7 @@ const optionalAuth = async (req, res, next) => {
     
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET)
-      const user = await User.findByPk(decoded.id)
+      const user = await User.findByPk(decoded.userId)
       if (user) {
         req.user = user
         req.userId = user.id

@@ -56,7 +56,7 @@ const columns = [
   { title: '配置', dataIndex: 'plan_name' },
   { title: '金额', key: 'amount' },
   { title: '状态', key: 'status' },
-  { title: '时间', dataIndex: 'created_at' },
+  { title: '时间', dataIndex: 'createdAt' },
   { title: '操作', key: 'action', width: 200 }
 ]
 

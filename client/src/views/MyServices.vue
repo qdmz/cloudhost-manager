@@ -59,7 +59,7 @@
                   <ReloadOutlined /> 重启
                 </a-button>
               </a-button-group>
-              <a-button @click="$router.push(`/service/${service.id}`)">
+              <a-button @click="$router.push(`/services/${service.id}`)">
                 <EyeOutlined /> 管理
               </a-button>
             </div>

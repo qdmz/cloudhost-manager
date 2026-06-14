@@ -203,8 +203,8 @@ const fetchData = async () => {
       getImages()
     ])
     users.value = usersRes.data?.list || []
-    nodes.value = nodesRes.data?.list || []
-    images.value = imagesRes.data?.list || []
+    nodes.value = Array.isArray(nodesRes.data) ? nodesRes.data : (nodesRes.data?.list || [])
+    images.value = Array.isArray(imagesRes.data) ? imagesRes.data : (imagesRes.data?.list || [])
   } catch (error) {
     console.error(error)
   }

@@ -45,7 +45,7 @@
         <router-link to="/admin/recharges" class="menu-item" :class="{ active: $route.path === '/admin/recharges' }">
           <DollarOutlined /> 充值记录
         </router-link>
-        <router-link to="/admin/backup" class="menu-item" :class="{ active: $route.path === '/admin/backup' }">
+        <router-link to="/admin/backups" class="menu-item" :class="{ active: $route.path === '/admin/backups' }">
           <DatabaseOutlined /> 数据备份
         </router-link>
       </nav>

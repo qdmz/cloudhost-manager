@@ -69,7 +69,7 @@ const columns = [
   { title: '外部端口', dataIndex: 'external_port', width: 100 },
   { title: '内部端口', dataIndex: 'internal_port', width: 100 },
   { title: '状态', key: 'status', width: 100 },
-  { title: '创建时间', dataIndex: 'created_at', width: 180 },
+  { title: '创建时间', dataIndex: 'createdAt', width: 180 },
   { title: '操作', key: 'action', width: 160 }
 ]
 

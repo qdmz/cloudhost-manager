@@ -48,7 +48,7 @@ const columns = [
   { title: '用户', dataIndex: 'username' },
   { title: '分类', key: 'category' },
   { title: '状态', key: 'status' },
-  { title: '创建时间', dataIndex: 'created_at' },
+  { title: '创建时间', dataIndex: 'createdAt' },
   { title: '操作', key: 'action' }
 ]
 

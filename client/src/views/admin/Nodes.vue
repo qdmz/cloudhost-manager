@@ -23,11 +23,12 @@
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
-            <a-button size="small" @click="editNode(record)">编辑</a-button>
-            <a-button size="small" @click="syncNode(record)"><SyncOutlined /> 同步</a-button>
+            <a-button size="small" @click="handleEditNode(record)">编辑</a-button>
+            <a-button size="small" @click="handleSyncNode(record)"><SyncOutlined /> 同步</a-button>
+            <a-button size="small" @click="handleTestPve(record)"><CheckOutlined /> 测试</a-button>
             <a-button size="small" @click="syncImages(record)"><DownloadOutlined /> 同步镜像</a-button>
             <a-button size="small" @click="manageImages(record)">镜像</a-button>
-            <a-popconfirm title="确定删除？" @confirm="deleteNode(record.id)">
+            <a-popconfirm title="确定删除？" @confirm="handleDeleteNode(record.id)">
               <a-button size="small" danger>删除</a-button>
             </a-popconfirm>
           </a-space>
@@ -35,7 +36,7 @@
       </template>
     </a-table>
     
-    <a-modal v-model:open="showAddModal" :title="nodeForm.id ? '编辑节点' : '添加节点'" width="800px" @ok="handleAdd">
+    <a-modal v-model:open="showAddModal" :title="nodeForm.id ? '编辑节点' : '添加节点'" width="800px" @ok="handleAddNode">
       <a-tabs v-model:activeKey="activeTab">
         <a-tab-pane key="basic" tab="基础配置">
           <a-form :model="nodeForm" layout="vertical">
@@ -136,7 +137,7 @@
                 </a-col>
               </a-row>
               <a-form-item>
-                <a-button type="primary" @click="testSshConnection" :loading="sshTesting">
+                <a-button type="primary" @click="handleTestSshLocal" :loading="sshTesting">
                   <ThunderboltOutlined /> 测试SSH连接
                 </a-button>
                 <span v-if="sshTestResult" :class="sshTestResult.success ? 'text-success' : 'text-error'" style="margin-left: 12px">
@@ -166,7 +167,7 @@
           <template v-if="column.key === 'action'">
             <a-space>
               <a-button size="small" @click="editImage(record)">编辑</a-button>
-              <a-popconfirm title="确定删除？" @confirm="deleteImage(record.id)">
+              <a-popconfirm title="确定删除？" @confirm="handleDeleteImage(record.id)">
                 <a-button size="small" danger>删除</a-button>
               </a-popconfirm>
             </a-space>
@@ -175,7 +176,7 @@
       </a-table>
     </a-modal>
     
-    <a-modal v-model:open="showAddImageModal" title="添加镜像" width="600px" @ok="handleAddImage">
+    <a-modal v-model:open="showAddImageModal" title="添加镜像" width="600px" @ok="handleAddImageLocal">
       <a-form :model="imageForm" layout="vertical">
         <a-row :gutter="16">
           <a-col :span="12">
@@ -221,7 +222,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getNodes, createNode, updateNode, deleteNode as apiDeleteNode, syncNode as apiSyncNode, syncNodeImages as apiSyncNodeImages, getImages, createImage, updateImage, deleteImage as apiDeleteImage, testSshConnection as apiTestSsh } from '@/api/admin'
+ import { getNodes as apiGetNodes, createNode, updateNode, deleteNode, syncNode, syncNodeImages, testSshConnection as apiTestSsh, testPVEConnection as apiTestPVE, getDomainBindings, updateDomainBinding, deleteDomainBinding, getPortForwards, updatePortForward, deletePortForward, importVM } from "@/api/admin";
 import { message } from 'ant-design-vue'
 
 const loading = ref(false)
@@ -266,7 +267,7 @@ const imageColumns = [
 const fetchNodes = async () => {
   loading.value = true
   try {
-    const res = await getNodes()
+    const res = await apiGetNodes()
     nodes.value = res.data?.list || []
   } catch (error) {
     console.error(error)
@@ -287,7 +288,7 @@ const openAddModal = () => {
   showAddModal.value = true
 }
 
-const handleAdd = async () => {
+const handleAddNode = async () => {
   try {
     if (!nodeForm.value.name || !nodeForm.value.host) {
       message.warning('请填写必填项')
@@ -317,7 +318,7 @@ const handleAdd = async () => {
   }
 }
 
-const editNode = (node) => {
+const handleEditNode = (node) => {
   nodeForm.value = { 
     ...node,
     ssh_password: '', // 不显示原密码
@@ -328,7 +329,7 @@ const editNode = (node) => {
   showAddModal.value = true
 }
 
-const testSshConnection = async () => {
+const handleTestSsh = async () => {
   if (!nodeForm.value.id) {
     message.warning('请先保存节点后再测试SSH连接')
     return
@@ -353,7 +354,7 @@ const testSshConnection = async () => {
   }
 }
 
-const syncNode = async (node) => {
+const handleSyncNode = async (node) => {
   try {
     message.loading('正在同步节点...', 0)
     await apiSyncNode(node.id)
@@ -363,6 +364,19 @@ const syncNode = async (node) => {
     message.error(error.message)
   } finally {
     message.destroy()
+  }
+}
+
+const handleTestPve = async (node) => {
+  try {
+    const res = await apiTestPVE(node.id)
+    if (res.data?.success) {
+      message.success("PVE API 连接成功")
+    } else {
+      message.error(res.data?.message || "PVE API 连接失败")
+    }
+  } catch (error) {
+    message.error(error.message || "PVE API 连接失败")
   }
 }
 
@@ -399,7 +413,7 @@ const editImage = (image) => {
   showAddImageModal.value = true
 }
 
-const handleAddImage = async () => {
+const handleAddImageLocal = async () => {
   try {
     if (imageForm.value.id) {
       await updateImage(imageForm.value.id, imageForm.value)
@@ -415,7 +429,7 @@ const handleAddImage = async () => {
   }
 }
 
-const deleteImage = async (id) => {
+const handleDeleteImage = async (id) => {
   try {
     await apiDeleteImage(id)
     message.success('删除成功')
@@ -425,7 +439,7 @@ const deleteImage = async (id) => {
   }
 }
 
-const deleteNode = async (id) => {
+const handleDeleteNode = async (id) => {
   try {
     await apiDeleteNode(id)
     message.success('删除成功')

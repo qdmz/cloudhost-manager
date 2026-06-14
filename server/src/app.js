@@ -1,10 +1,11 @@
-require('dotenv').config()
+require("dotenv").config({ path: require("path").join(__dirname, "..", "..", ".env") })
 
 const express = require('express')
 const cors = require('cors')
 const helmet = require('helmet')
 const morgan = require('morgan')
 const cookieParser = require('cookie-parser')
+const http = require('http')
 const path = require('path')
 
 const app = express()
@@ -16,7 +17,6 @@ app.use(helmet({
   crossOriginResourcePolicy: false
 }))
 
-// 手动设置允许跨域的响应头
 app.use((req, res, next) => {
   res.set({
     'Cross-Origin-Opener-Policy': 'unsafe-none',
@@ -31,10 +31,10 @@ app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
-// 静态文件服务
 const CLIENT_DIST = path.join(__dirname, '../../client/dist')
 app.use(express.static(CLIENT_DIST))
 
+// Routes
 app.use('/api/auth', require('./routes/auth'))
 app.use('/api/captcha', require('./routes/captcha'))
 app.use('/api/user', require('./routes/user'))
@@ -50,6 +50,8 @@ app.use('/api/admin', require('./routes/admin'))
 app.use('/api/pay', require('./routes/pay'))
 app.use('/api/domain-bindings', require('./routes/domain_bindings'))
 app.use('/api/port-forwards', require('./routes/port_forwards'))
+app.use('/api/console', require('./routes/console'))
+app.use('/api/backup', require('./routes/admin_backups'))
 
 app.get('/api/health', (req, res) => {
   res.json({ code: 200, message: 'OK' })
@@ -69,12 +71,16 @@ app.use((err, req, res, next) => {
   res.status(500).json({ code: 500, message: '服务器错误' })
 })
 
-// 前端路由 fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(CLIENT_DIST, 'index.html'))
 })
 
-app.listen(PORT, '0.0.0.0', () => {
+// Create HTTP server and mount WebSocket
+const server = http.createServer(app)
+const { init } = require('./routes/consoleWs')
+init(server)
+
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`)
 })
 

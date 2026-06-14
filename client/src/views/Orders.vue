@@ -22,8 +22,8 @@
         <template v-else-if="column.key === 'status'">
           <a-tag :color="getStatusColor(record.status)">{{ getStatusText(record.status) }}</a-tag>
         </template>
-        <template v-else-if="column.key === 'created_at'">
-          {{ formatDate(record.created_at) }}
+        <template v-else-if="column.key === 'createdAt'">
+          {{ formatDate(record.createdAt) }}
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
@@ -69,11 +69,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { getOrders, cancelOrder as apiCancelOrder, getPayUrl } from '@/api/order'
+import { useUserStore } from '@/store/user'
+import request from '@/utils/request'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 
+const userStore = useUserStore()
+const userInfo = computed(() => userStore.userInfo || {})
 const loading = ref(false)
 const orders = ref([])
 const showPaymentModal = ref(false)
@@ -86,7 +90,7 @@ const columns = [
   { title: '产品', dataIndex: ['product', 'name'] },
   { title: '金额', dataIndex: 'amount' },
   { title: '状态', key: 'status' },
-  { title: '时间', key: 'created_at' },
+  { title: '时间', key: 'createdAt' },
   { title: '操作', key: 'action' }
 ]
 
@@ -127,14 +131,30 @@ const payOrder = (order) => {
 const confirmPay = async () => {
   paying.value = true
   try {
-    message.info('正在跳转支付页面...')
-    const res = await getPayUrl(currentOrder.value.id, { payment_method: selectedPaymentMethod.value })
-    if (res.data && res.data.pay_url) {
-      window.location.href = res.data.pay_url
+    const pm = selectedPaymentMethod.value
+    if (pm === 'balance') {
+      // Balance payment - call direct pay endpoint
+      const res = await request.post(`/orders/${currentOrder.value.id}/pay`, { payment_method: 'balance' })
+      if (res.code === 200) {
+        message.success('支付成功')
+        showPaymentModal.value = false
+        fetchOrders()
+        // Refresh balance
+        userStore.fetchUserInfo()
+      } else {
+        message.error(res.message || '支付失败')
+      }
     } else {
-      message.error('支付链接获取失败')
+      // External payment
+      message.info('正在跳转支付页面...')
+      const res = await getPayUrl(currentOrder.value.id, { payment_method: pm })
+      if (res.data && res.data.pay_url) {
+        window.location.href = res.data.pay_url
+      } else {
+        message.error('支付链接获取失败')
+      }
+      showPaymentModal.value = false
     }
-    showPaymentModal.value = false
   } catch (error) {
     message.error(error.message || '支付失败')
   } finally {
@@ -154,6 +174,9 @@ const cancelOrder = async (order) => {
 
 onMounted(() => {
   fetchOrders()
+  if (!userStore.userInfo) {
+    userStore.fetchUserInfo()
+  }
 })
 </script>
 

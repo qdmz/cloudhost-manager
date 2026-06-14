@@ -56,7 +56,7 @@
         <template v-else>
           <div v-for="item in announcements" :key="item.id" class="announcement-item" @click="$router.push(`/announcements/${item.id}`)">
             <span class="title">{{ item.title }}</span>
-            <span class="date">{{ formatDate(item.created_at) }}</span>
+            <span class="date">{{ formatDate(item.createdAt) }}</span>
           </div>
           <a-empty v-if="announcements.length === 0" description="暂无公告" />
         </template>

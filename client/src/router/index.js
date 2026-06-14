@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
@@ -21,49 +21,79 @@ const routes = [
         path: 'products',
         name: 'Products',
         component: () => import('@/views/Products.vue'),
-        meta: { title: '产品列表', requiresAuth: true }
+        meta: { title: '产品' }
       },
       {
-        path: 'my-services',
-        name: 'MyServices',
+        path: 'services',
+        name: 'Services',
         component: () => import('@/views/MyServices.vue'),
-        meta: { title: '我的服务', requiresAuth: true }
-      },
-      {
-        path: 'service/:id',
-        name: 'ServiceDetail',
-        component: () => import('@/views/ServiceDetail.vue'),
-        meta: { title: '服务详情', requiresAuth: true }
-      },
-      {
-        path: 'recharge',
-        name: 'Recharge',
-        component: () => import('@/views/Recharge.vue'),
-        meta: { title: '充值中心', requiresAuth: true }
+        meta: { title: '我的服务' }
       },
       {
         path: 'orders',
         name: 'Orders',
         component: () => import('@/views/Orders.vue'),
-        meta: { title: '我的订单', requiresAuth: true }
+        meta: { title: '我的订单' }
+      },
+      {
+        path: 'recharge',
+        name: 'Recharge',
+        component: () => import('@/views/Recharge.vue'),
+        meta: { title: '账户充值' }
       },
       {
         path: 'tickets',
         name: 'Tickets',
         component: () => import('@/views/Tickets.vue'),
-        meta: { title: '工单系统', requiresAuth: true }
+        meta: { title: '工单系统' }
       },
       {
-        path: 'ticket/:id',
+        path: 'tickets/:id',
         name: 'TicketDetail',
         component: () => import('@/views/TicketDetail.vue'),
-        meta: { title: '工单详情', requiresAuth: true }
+        meta: { title: '工单详情' }
+      },
+      {
+        path: 'user-center',
+        name: 'UserCenter',
+        component: () => import('@/views/UserCenter.vue'),
+        meta: { title: '个人中心' }
+      },
+      {
+        path: 'user-center/authentication',
+        name: 'Authentication',
+        component: () => import('@/views/Authentication.vue'),
+        meta: { title: '实名认证' }
+      },
+      {
+        path: 'user-center/domain-bindings',
+        name: 'DomainBindings',
+        component: () => import('@/views/DomainBindings.vue'),
+        meta: { title: '域名绑定' }
+      },
+      {
+        path: 'user-center/port-forwards',
+        name: 'PortForwards',
+        component: () => import('@/views/PortForwards.vue'),
+        meta: { title: '端口转发' }
+      },
+      {
+        path: 'services/:id',
+        name: 'ServiceDetail',
+        component: () => import('@/views/ServiceDetail.vue'),
+        meta: { title: '服务详情' }
+      },
+      {
+        path: 'services/:id/vnc',
+        name: 'VNC',
+        component: () => import('@/views/VNC.vue'),
+        meta: { title: 'VNC 控制台' }
       },
       {
         path: 'announcements',
         name: 'Announcements',
         component: () => import('@/views/Announcements.vue'),
-        meta: { title: '公告中心' }
+        meta: { title: '公告' }
       },
       {
         path: 'announcements/:id',
@@ -71,29 +101,184 @@ const routes = [
         component: () => import('@/views/AnnouncementDetail.vue'),
         meta: { title: '公告详情' }
       },
+      // 用户直接访问的路由（菜单链接用的是这些路径）
       {
-        path: 'user-center',
-        name: 'UserCenter',
-        component: () => import('@/views/UserCenter.vue'),
-        meta: { title: '用户中心', requiresAuth: true }
+        path: 'my-services',
+        name: 'MyServicesAlias',
+        redirect: '/services'
       },
       {
-        path: 'authentication',
-        name: 'Authentication',
-        component: () => import('@/views/Authentication.vue'),
-        meta: { title: '实名认证', requiresAuth: true }
+        path: 'my-orders',
+        name: 'MyOrdersAlias',
+        redirect: '/orders'
       },
       {
         path: 'domain-bindings',
-        name: 'DomainBindings',
-        component: () => import('@/views/DomainBindings.vue'),
-        meta: { title: '域名绑定', requiresAuth: true }
+        name: 'UserDomainBindings',
+        redirect: '/user-center/domain-bindings'
       },
       {
         path: 'port-forwards',
-        name: 'PortForwards',
-        component: () => import('@/views/PortForwards.vue'),
-        meta: { title: '端口转发', requiresAuth: true }
+        name: 'UserPortForwards',
+        redirect: '/user-center/port-forwards'
+      },
+      // 兼容 /service/:id 单数形式
+      {
+        path: 'service/:id',
+        name: 'ServiceDetailAlias',
+        redirect: (route) => ({ name: 'ServiceDetail', params: { id: route.params.id } })
+      }
+    ]
+  },
+  {
+    path: '/admin',
+    component: () => import('@/views/admin/Layout.vue'),
+    meta: { title: '管理后台', admin: true },
+    redirect: '/admin/dashboard',
+    children: [
+      {
+        path: 'dashboard',
+        name: 'AdminDashboard',
+        component: () => import('@/views/admin/Dashboard.vue'),
+        meta: { title: '仪表盘' }
+      },
+      {
+        path: 'users',
+        name: 'AdminUsers',
+        component: () => import('@/views/admin/Users.vue'),
+        meta: { title: '用户管理' }
+      },
+      {
+        path: 'products',
+        name: 'AdminProducts',
+        component: () => import('@/views/admin/Products.vue'),
+        meta: { title: '产品管理' }
+      },
+      {
+        path: 'nodes',
+        name: 'AdminNodes',
+        component: () => import('@/views/admin/Nodes.vue'),
+        meta: { title: '节点管理' }
+      },
+      {
+        path: 'services',
+        name: 'AdminServices',
+        component: () => import('@/views/admin/Services.vue'),
+        meta: { title: '服务管理' }
+      },
+      {
+        path: 'orders',
+        name: 'AdminOrders',
+        component: () => import('@/views/admin/Orders.vue'),
+        meta: { title: '订单管理' }
+      },
+      {
+        path: 'recharges',
+        name: 'AdminRecharges',
+        component: () => import('@/views/admin/Recharges.vue'),
+        meta: { title: '充值管理' }
+      },
+      {
+        path: 'tickets',
+        name: 'AdminTickets',
+        component: () => import('@/views/admin/Tickets.vue'),
+        meta: { title: '工单管理' }
+      },
+      {
+        path: 'tickets/:id',
+        name: 'AdminTicketDetail',
+        component: () => import('@/views/admin/TicketDetail.vue'),
+        meta: { title: '工单详情' }
+      },
+      {
+        path: 'vouchers',
+        name: 'AdminVouchers',
+        component: () => import('@/views/admin/Vouchers.vue'),
+        meta: { title: '兑换码管理' }
+      },
+      {
+        path: 'images',
+        name: 'AdminImages',
+        component: () => import('@/views/admin/Nodes.vue'),
+        meta: { title: '镜像管理' }
+      },
+      {
+        path: 'configs',
+        name: 'AdminConfigs',
+        component: () => import('@/views/admin/Configs.vue'),
+        meta: { title: '系统设置' }
+      },
+      {
+        path: 'announcements',
+        name: 'AdminAnnouncements',
+        component: () => import('@/views/admin/Announcements.vue'),
+        meta: { title: '公告管理' }
+      },
+      {
+        path: 'domain-bindings',
+        name: 'AdminDomainBindings',
+        component: () => import('@/views/admin/DomainBindings.vue'),
+        meta: { title: '域名绑定' }
+      },
+      {
+        path: 'port-forwards',
+        name: 'AdminPortForwards',
+        component: () => import('@/views/admin/PortForwards.vue'),
+        meta: { title: '端口转发' }
+      },
+      {
+        path: 'custom-create',
+        name: 'AdminCustomCreate',
+        component: () => import('@/views/admin/CustomCreate.vue'),
+        meta: { title: '自定义创建' }
+      },
+      {
+        path: 'backups',
+        name: 'AdminBackups',
+        component: () => import('@/views/admin/Backup.vue'),
+        meta: { title: '备份管理' }
+      },
+      // 单数别名
+      {
+        path: 'backup',
+        name: 'AdminBackupAlias',
+        redirect: '/admin/backups'
+      },
+      {
+        path: 'domain-binding',
+        name: 'AdminDomainBindingAlias',
+        redirect: '/admin/domain-bindings'
+      },
+      {
+        path: 'port-forward',
+        name: 'AdminPortForwardAlias',
+        redirect: '/admin/port-forwards'
+      }
+    ]
+  },
+  {
+    path: '/agent',
+    component: () => import('@/views/Layout.vue'),
+    meta: { title: '代理商中心' },
+    redirect: '/agent/dashboard',
+    children: [
+      {
+        path: 'dashboard',
+        name: 'AgentDashboard',
+        component: () => import('@/views/AgentDashboard.vue'),
+        meta: { title: '代理商仪表盘' }
+      },
+      {
+        path: 'sub-users',
+        name: 'AgentSubUsers',
+        component: () => import('@/views/AgentSubUsers.vue'),
+        meta: { title: '子用户管理' }
+      },
+      {
+        path: 'commissions',
+        name: 'AgentCommissions',
+        component: () => import('@/views/AgentCommissions.vue'),
+        meta: { title: '佣金管理' }
       }
     ]
   },
@@ -101,164 +286,45 @@ const routes = [
     path: '/login',
     name: 'Login',
     component: () => import('@/views/Login.vue'),
-    meta: { title: '用户登录' }
+    meta: { guest: true, title: '登录' }
   },
   {
     path: '/register',
     name: 'Register',
     component: () => import('@/views/Register.vue'),
-    meta: { title: '用户注册' }
+    meta: { guest: true, title: '注册' }
   },
   {
     path: '/forgot-password',
     name: 'ForgotPassword',
     component: () => import('@/views/ForgotPassword.vue'),
-    meta: { title: '忘记密码' }
-  },
-  {
-    path: '/admin',
-    component: () => import('@/views/admin/Layout.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true },
-    children: [
-      {
-        path: '',
-        name: 'AdminDashboard',
-        component: () => import('@/views/admin/Dashboard.vue'),
-        meta: { title: '管理后台', requiresAdmin: true }
-      },
-      {
-        path: 'users',
-        name: 'AdminUsers',
-        component: () => import('@/views/admin/Users.vue'),
-        meta: { title: '用户管理', requiresAdmin: true }
-      },
-      {
-          path: 'orders',
-          name: 'AdminOrders',
-          component: () => import('@/views/admin/Orders.vue'),
-          meta: { title: '订单管理', requiresAdmin: true }
-        },
-        {
-          path: 'services',
-          name: 'AdminServices',
-          component: () => import('@/views/admin/Services.vue'),
-          meta: { title: '服务管理', requiresAdmin: true }
-        },
-        {
-          path: 'tickets',
-          name: 'AdminTickets',
-          component: () => import('@/views/admin/Tickets.vue'),
-          meta: { title: '工单管理', requiresAdmin: true }
-        },
-        {
-          path: 'tickets/:id',
-          name: 'AdminTicketDetail',
-          component: () => import('@/views/admin/TicketDetail.vue'),
-          meta: { title: '工单详情', requiresAdmin: true }
-        },
-      {
-        path: 'products',
-        name: 'AdminProducts',
-        component: () => import('@/views/admin/Products.vue'),
-        meta: { title: '产品管理', requiresAdmin: true }
-      },
-      {
-        path: 'nodes',
-        name: 'AdminNodes',
-        component: () => import('@/views/admin/Nodes.vue'),
-        meta: { title: '节点管理', requiresAdmin: true }
-      },
-      {
-        path: 'configs',
-        name: 'AdminConfigs',
-        component: () => import('@/views/admin/Configs.vue'),
-        meta: { title: '系统配置', requiresAdmin: true }
-      },
-      {
-        path: 'announcements',
-        name: 'AdminAnnouncements',
-        component: () => import('@/views/admin/Announcements.vue'),
-        meta: { title: '公告管理', requiresAdmin: true }
-      },
-      {
-        path: 'vouchers',
-        name: 'AdminVouchers',
-        component: () => import('@/views/admin/Vouchers.vue'),
-        meta: { title: '代金券管理', requiresAdmin: true }
-      },
-      {
-        path: 'custom-create',
-        name: 'AdminCustomCreate',
-        component: () => import('@/views/admin/CustomCreate.vue'),
-        meta: { title: '自定义开通', requiresAdmin: true }
-      },
-      {
-        path: 'domain-bindings',
-        name: 'AdminDomainBindings',
-        component: () => import('@/views/admin/DomainBindings.vue'),
-        meta: { title: '域名绑定管理', requiresAdmin: true }
-      },
-      {
-        path: 'port-forwards',
-        name: 'AdminPortForwards',
-        component: () => import('@/views/admin/PortForwards.vue'),
-        meta: { title: '端口转发管理', requiresAdmin: true }
-      },
-      {
-        path: 'recharges',
-        name: 'AdminRecharges',
-        component: () => import('@/views/admin/Recharges.vue'),
-        meta: { title: '充值记录', requiresAdmin: true }
-      },
-      {
-        path: 'backup',
-        name: 'AdminBackup',
-        component: () => import('@/views/admin/Backup.vue'),
-        meta: { title: '数据备份', requiresAdmin: true }
-      }
-    ]
-  },
-  {
-    path: '/vnc/:id',
-    name: 'VNC',
-    component: () => import('@/views/VNC.vue'),
-    meta: { title: 'VNC连接', requiresAuth: true }
+    meta: { guest: true, title: '忘记密码' }
   },
   {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
-    component: () => import('@/views/NotFound.vue'),
-    meta: { title: '页面不存在' }
+    component: () => import('@/views/NotFound.vue')
   }
 ]
 
 const router = createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes
 })
 
-router.beforeEach(async (to, from, next) => {
+router.beforeEach((to, from, next) => {
   NProgress.start()
+  document.title = `${to.meta.title || 'CloudHost'} - CloudHost Manager`
+  const userStore = useUserStore()
+  const token = userStore.token
   
-  if (to.meta.title) {
-    document.title = `${to.meta.title} - CloudHost`
+  if (to.meta.admin && !token) {
+    next('/login')
+  } else if (to.meta.guest && token && to.name !== 'NotFound') {
+    next('/')
+  } else {
+    next()
   }
-
-  if (to.meta.requiresAuth) {
-    const userStore = useUserStore()
-    if (!userStore.isLoggedIn) {
-      return next({ name: 'Login', query: { redirect: to.fullPath } })
-    }
-  }
-
-  if (to.meta.requiresAdmin) {
-    const userStore = useUserStore()
-    if (!userStore.isAdmin) {
-      return next({ name: 'Home' })
-    }
-  }
-
-  next()
 })
 
 router.afterEach(() => {

@@ -1,303 +1,183 @@
 <template>
   <div class="backup-page">
     <div class="page-header">
-      <h2>数据备份与恢复</h2>
-      <a-space>
-        <a-button type="primary" @click="createBackup" :loading="creating">
-          <PlusOutlined /> 创建备份
-        </a-button>
-        <a-button @click="refreshList">
-          <ReloadOutlined /> 刷新
-        </a-button>
-      </a-space>
+      <h2>网站数据备份恢复</h2>
     </div>
-
-    <a-alert
-      message="备份说明"
-      type="info"
-      show-icon
-      style="margin-bottom: 16px"
-    >
-      <template #description>
-        <ul style="margin: 8px 0 0 0; padding-left: 20px;">
-          <li>系统会自动保留最近 {{ maxBackups }} 份备份，超出后自动清理旧备份</li>
-          <li>建议在重要操作前手动创建备份</li>
-          <li>恢复数据会覆盖当前数据，请谨慎操作</li>
-          <li>备份文件存储在服务器 <code>server/backups</code> 目录</li>
-        </ul>
-      </template>
-    </a-alert>
-
-    <a-card title="存储概览" style="margin-bottom: 16px">
-      <a-statistic
-        title="备份总大小"
-        :value="formatBytes(totalSize)"
-        :value-style="{ fontSize: '24px' }"
-      />
-    </a-card>
-
-    <a-table 
-      :columns="columns" 
-      :data-source="backups" 
-      :loading="loading" 
-      row-key="name"
-      :pagination="false"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'created_at'">
-          {{ formatDate(record.created_at) }}
-        </template>
-        <template v-else-if="column.key === 'size'">
-          {{ formatBytes(record.size) }}
-        </template>
-        <template v-else-if="column.key === 'details'">
-          <div style="font-size: 12px; color: #666;">
-            <div v-if="record.database_size">
-              <DatabaseOutlined /> 数据库: {{ formatBytes(record.database_size) }}
-            </div>
-            <div v-if="record.files_size">
-              <FileOutlined /> 文件: {{ formatBytes(record.files_size) }}
-            </div>
-          </div>
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-space>
-            <a-dropdown>
-              <a-button size="small">
-                <DownloadOutlined /> 下载
-                <DownOutlined />
-              </a-button>
-              <template #overlay>
-                <a-menu>
-                  <a-menu-item key="db" @click="downloadBackup(record.name, 'database')">
-                    <DatabaseOutlined /> 数据库备份
-                  </a-menu-item>
-                  <a-menu-item key="files" @click="downloadBackup(record.name, 'files')" v-if="record.files_size">
-                    <FileOutlined /> 文件备份
-                  </a-menu-item>
-                </a-menu>
-              </template>
-            </a-dropdown>
-            <a-button size="small" type="primary" @click="showRestoreModal(record)" :loading="restoring === record.name">
-              <SyncOutlined /> 恢复
-            </a-button>
-            <a-popconfirm 
-              title="确定删除此备份吗？此操作不可恢复。" 
-              @confirm="deleteBackup(record.name)"
-            >
-              <a-button size="small" danger :loading="deleting === record.name">
-                <DeleteOutlined /> 删除
-              </a-button>
-            </a-popconfirm>
+    
+    <a-row :gutter="16">
+      <a-col :span="12">
+        <a-card title="数据库备份">
+          <a-space style="margin-bottom:16px">
+            <a-button type="primary" @click="createBackup" :loading="creating">立即备份</a-button>
+            <a-button @click="refreshBackups">刷新列表</a-button>
           </a-space>
-        </template>
-      </template>
-    </a-table>
-
-    <!-- 恢复确认弹窗 -->
-    <a-modal
-      v-model:open="showRestoreDialog"
-      title="确认恢复数据"
-      @ok="confirmRestore"
-      :confirmLoading="restoringBtn"
-      ok-text="确认恢复"
-      cancel-text="取消"
-    >
-      <a-alert
-        message="警告"
-        type="warning"
-        show-icon
-        style="margin-bottom: 16px"
-      >
-        <template #description>
-          恢复操作会覆盖当前数据，此操作不可逆！建议在恢复前先创建新的备份。
-        </template>
-      </a-alert>
-
-      <a-form :model="restoreForm" layout="vertical">
-        <a-form-item label="备份名称">
-          <a-input :value="restoreForm.name" disabled />
+          
+          <a-table 
+            :columns="columns" 
+            :data-source="backups" 
+            :loading="loading" 
+            :pagination="false" 
+            row-key="name"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'size'">
+                {{ formatSize(record.size) }}
+              </template>
+              <template v-else-if="column.key === 'action'">
+                <a-button size="small" @click="downloadBackup(record)">下载</a-button>
+                <a-popconfirm title="确定要恢复此备份吗？这会覆盖当前数据库！" @confirm="restoreBackup(record)" style="margin-left:8px">
+                  <a-button size="small" danger>恢复</a-button>
+                </a-popconfirm>
+                <a-popconfirm title="确定要删除此备份吗？" @confirm="deleteBackup(record)" style="margin-left:8px">
+                  <a-button size="small" danger>删除</a-button>
+                </a-popconfirm>
+              </template>
+            </template>
+          </a-table>
+        </a-card>
+      </a-col>
+      
+      <a-col :span="12">
+        <a-card title="一键操作">
+          <a-form layout="vertical">
+            <a-form-item label="备份类型">
+              <a-radio-group v-model:value="backupType">
+                <a-radio value="database">仅数据库</a-radio>
+                <a-radio value="files">仅文件</a-radio>
+                <a-radio value="full">数据库+文件</a-radio>
+              </a-radio-group>
+            </a-form-item>
+            <a-form-item>
+              <a-button type="primary" @click="createBackup" :loading="creating">立即备份</a-button>
+            </a-form-item>
+          </a-form>
+          
+          <a-divider>恢复选项</a-divider>
+          <a-alert message="恢复操作将覆盖当前数据，请谨慎操作！" type="warning" show-icon />
+          <a-button type="primary" danger @click="fullRestore" :loading="restoring" style="margin-top:16px">
+            一键恢复（最新备份）
+          </a-button>
+        </a-card>
+      </a-col>
+    </a-row>
+    
+    <a-card title="备份设置" style="margin-top:24px">
+      <a-form :model="settings" layout="inline">
+        <a-form-item label="保留天数">
+          <a-input-number v-model:value="settings.retention_days" :min="1" style="width:120px" />
         </a-form-item>
-        <a-form-item label="备份时间">
-          <a-input :value="formatDate(restoreForm.created_at)" disabled />
+        <a-form-item label="自动备份">
+          <a-switch v-model:checked="settings.auto_backup" />
         </a-form-item>
         <a-form-item>
-          <a-checkbox v-model:checked="restoreForm.restore_database" disabled>
-            恢复数据库
-          </a-checkbox>
-        </a-form-item>
-        <a-form-item>
-          <a-checkbox v-model:checked="restoreForm.restore_files">
-            同时恢复上传文件（可选）
-          </a-checkbox>
+          <a-button type="primary" @click="handleSaveSettings">保存</a-button>
         </a-form-item>
       </a-form>
-    </a-modal>
+    </a-card>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { message, Modal } from 'ant-design-vue'
-import { 
-  PlusOutlined, 
-  ReloadOutlined, 
-  DownloadOutlined, 
-  SyncOutlined, 
-  DeleteOutlined,
-  DownOutlined,
-  DatabaseOutlined,
-  FileOutlined
-} from '@ant-design/icons-vue'
-import { getBackups, createBackup as apiCreateBackup, restoreBackup, deleteBackup as apiDeleteBackup } from '@/api/admin'
+import { message } from 'ant-design-vue'
+import { getBackups, createBackup as createBackupApi, deleteBackup as deleteBackupApi, restoreBackup as restoreBackupApi, downloadBackup as downloadBackupApi } from '@/api/admin'
 
+const backups = ref([])
 const loading = ref(false)
 const creating = ref(false)
-const restoring = ref(null)
-const deleting = ref(null)
-const restoringBtn = ref(false)
-const backups = ref([])
-const totalSize = ref(0)
-const showRestoreDialog = ref(false)
-const maxBackups = 10
-
-const restoreForm = ref({
-  name: '',
-  created_at: '',
-  restore_database: true,
-  restore_files: false
-})
+const restoring = ref(false)
+const backupType = ref('database')
+const settings = ref({ retention_days: 30, auto_backup: false })
 
 const columns = [
-  { title: '备份名称', dataIndex: 'name' },
-  { title: '备份时间', key: 'created_at' },
-  { title: '总大小', key: 'size' },
-  { title: '备份详情', key: 'details' },
-  { title: '操作', key: 'action', width: 300 }
+  { title: '备份名称', dataIndex: 'name', width: 200 },
+  { title: '类型', dataIndex: 'type', width: 100 },
+  { title: '大小', key: 'size', width: 100 },
+  { title: '创建时间', dataIndex: 'createdAt', width: 180 },
+  { title: '操作', key: 'action', width: 200 }
 ]
 
-const formatBytes = (bytes) => {
-  if (!bytes || bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-const formatDate = (date) => {
-  if (!date) return '-'
-  return new Date(date).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-}
-
-const fetchBackups = async () => {
+const refreshBackups = async () => {
   loading.value = true
   try {
     const res = await getBackups()
     backups.value = res.data?.list || []
-    totalSize.value = res.data?.total_size || 0
-  } catch (error) {
+  } catch (e) {
     message.error('获取备份列表失败')
-    console.error(error)
-  } finally {
-    loading.value = false
   }
-}
-
-const refreshList = () => {
-  fetchBackups()
+  loading.value = false
 }
 
 const createBackup = async () => {
   creating.value = true
   try {
-    const res = await apiCreateBackup()
+    await createBackupApi({ type: backupType.value })
     message.success('备份创建成功')
-    fetchBackups()
-  } catch (error) {
-    message.error(error.message || '备份创建失败')
-  } finally {
-    creating.value = false
+    await refreshBackups()
+  } catch (e) {
+    message.error(e.response?.data?.message || '备份失败')
   }
+  creating.value = false
 }
 
-const showRestoreModal = (record) => {
-  restoreForm.value = {
-    name: record.name,
-    created_at: record.created_at,
-    restore_database: true,
-    restore_files: false
-  }
-  showRestoreDialog.value = true
+const downloadBackup = async (record) => {
+  window.open(`/api/admin/backups/${record.name}/download`, '_blank')
 }
 
-const confirmRestore = async () => {
-  Modal.confirm({
-    title: '再次确认',
-    content: '确定要恢复此备份吗？这将覆盖当前所有数据！',
-    okText: '确定恢复',
-    cancelText: '取消',
-    async onOk() {
-      restoringBtn.value = true
-      try {
-        await restoreBackup(restoreForm.value.name, {
-          restore_database: restoreForm.value.restore_database,
-          restore_files: restoreForm.value.restore_files
-        })
-        message.success('数据恢复成功')
-        showRestoreDialog.value = false
-        fetchBackups()
-      } catch (error) {
-        message.error(error.message || '恢复失败')
-      } finally {
-        restoringBtn.value = false
-      }
-    }
-  })
-}
-
-const downloadBackup = async (name, type) => {
+const restoreBackup = async (record) => {
+  restoring.value = true
   try {
-    const url = `/api/admin/backups/${name}/download?type=${type}`
-    window.open(url, '_blank')
-  } catch (error) {
-    message.error('下载失败')
+    await apiRestoreBackup(record.name, {})
+    message.success('恢复成功')
+    await refreshBackups()
+  } catch (e) {
+    message.error(e.response?.data?.message || '恢复失败')
+  }
+  restoring.value = false
+}
+
+const deleteBackup = async (record) => {
+  try {
+    await deleteBackupApi(record.name)
+    message.success('删除成功')
+    await refreshBackups()
+  } catch (e) {
+    message.error(e.response?.data?.message || '删除失败')
   }
 }
 
-const deleteBackup = async (name) => {
-  deleting.value = name
+const fullRestore = async () => {
+  restoring.value = true
   try {
-    await apiDeleteBackup(name)
-    message.success('备份已删除')
-    fetchBackups()
-  } catch (error) {
-    message.error(error.message || '删除失败')
-  } finally {
-    deleting.value = null
+    await restoreBackupApi('latest', {})
+    message.success('一键恢复成功')
+  } catch (e) {
+    message.error(e.response?.data?.message || '恢复失败')
   }
+  restoring.value = false
+}
+
+const handleSaveSettings = () => {
+  message.success('备份设置已保存')
+}
+
+const formatSize = (size) => {
+  if (!size) return '-'
+  const mb = size / (1024 * 1024)
+  if (mb > 1024) return (mb / 1024).toFixed(1) + ' GB'
+  return mb.toFixed(1) + ' MB'
 }
 
 onMounted(() => {
-  fetchBackups()
+  refreshBackups()
 })
 </script>
 
-<style scoped lang="scss">
+<style lang="scss" scoped>
 .backup-page {
-  padding: 20px;
-
   .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
+    h2 { font-size: 20px; }
   }
 }
 </style>

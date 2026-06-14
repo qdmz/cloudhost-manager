@@ -63,7 +63,7 @@ const columns = [
   { title: 'ID', dataIndex: 'id', width: 60 },
   { title: '标题', key: 'title' },
   { title: '浏览量', dataIndex: 'views' },
-  { title: '发布时间', dataIndex: 'created_at' },
+  { title: '发布时间', dataIndex: 'createdAt' },
   { title: '操作', key: 'action' }
 ]
 

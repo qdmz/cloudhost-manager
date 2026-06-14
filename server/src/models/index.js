@@ -40,7 +40,12 @@ const Service = sequelize.define('Service', {
   password: { type: DataTypes.STRING(255) },
   price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   expire_time: { type: DataTypes.DATE, allowNull: false },
-  note: { type: DataTypes.TEXT }
+  note: { type: DataTypes.TEXT },
+  ssh_port: { type: DataTypes.INTEGER },
+  vnc_port: { type: DataTypes.INTEGER },
+  custom_ports: { type: DataTypes.TEXT },
+  auto_renew: { type: DataTypes.BOOLEAN, defaultValue: false },
+  network_usage: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }
 }, { tableName: 'services', timestamps: true, underscored: true })
 
 const Product = sequelize.define('Product', {
@@ -55,7 +60,12 @@ const Product = sequelize.define('Product', {
   min_price: { type: DataTypes.DECIMAL(10, 2) },
   max_price: { type: DataTypes.DECIMAL(10, 2) },
   status: { type: DataTypes.ENUM('online', 'offline'), defaultValue: 'online' },
-  sort: { type: DataTypes.INTEGER, defaultValue: 0 }
+  sort: { type: DataTypes.INTEGER, defaultValue: 0 },
+  node_id: { type: DataTypes.INTEGER, allowNull: true },
+  default_type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus'), defaultValue: 'kvm' },
+  default_os: { type: DataTypes.STRING(50), defaultValue: '' },
+  custom_ports: { type: DataTypes.TEXT },
+  auto_renew: { type: DataTypes.BOOLEAN, defaultValue: false }
 }, { tableName: 'products', timestamps: true, underscored: true })
 
 const Plan = sequelize.define('Plan', {
@@ -76,8 +86,8 @@ const Order = sequelize.define('Order', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   user_id: { type: DataTypes.INTEGER, allowNull: false },
   order_no: { type: DataTypes.STRING(32), unique: true, allowNull: false },
-  product_id: { type: DataTypes.INTEGER, allowNull: false },
-  plan_id: { type: DataTypes.INTEGER, allowNull: false },
+  product_id: { type: DataTypes.INTEGER, allowNull: true },
+  plan_id: { type: DataTypes.INTEGER, allowNull: true },
   node_id: { type: DataTypes.INTEGER, allowNull: false },
   cycle: { type: DataTypes.ENUM('monthly', 'quarterly', 'yearly'), allowNull: false },
   quantity: { type: DataTypes.INTEGER, defaultValue: 1 },
@@ -193,8 +203,11 @@ const Config = sequelize.define('Config', {
 const AuthRequest = sequelize.define('AuthRequest', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   user_id: { type: DataTypes.INTEGER, allowNull: false },
-  real_name: { type: DataTypes.STRING(50), allowNull: false },
-  id_card: { type: DataTypes.STRING(18), allowNull: false },
+  real_name: { type: DataTypes.STRING(50) },
+  type: { type: DataTypes.STRING(30), allowNull: false },
+  token: { type: DataTypes.TEXT, allowNull: false },
+  expires_at: { type: DataTypes.DATE, allowNull: false },
+  id_card: { type: DataTypes.STRING(18) },
   id_card_front: { type: DataTypes.STRING(255) },
   id_card_back: { type: DataTypes.STRING(255) },
   status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' },
@@ -227,13 +240,17 @@ const PortForward = sequelize.define('PortForward', {
   external_port: { type: DataTypes.INTEGER, allowNull: false },
   internal_ip: { type: DataTypes.STRING(50) },
   internal_port: { type: DataTypes.INTEGER, allowNull: false },
-  status: { type: DataTypes.ENUM('active', 'inactive', 'pending'), defaultValue: 'pending' },
+  fwd_type: { type: DataTypes.STRING(20), defaultValue: 'custom' },
+  port_range_end: { type: DataTypes.INTEGER },
+  status: { type: DataTypes.ENUM('active', 'inactive', 'pending'), defaultValue: 'active' },
   note: { type: DataTypes.TEXT }
 }, { tableName: 'port_forwards', timestamps: true, underscored: true })
 
 User.hasMany(Service, { foreignKey: 'user_id' })
 Service.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
-Service.belongsTo(Node, { foreignKey: 'node_id', as: 'node' })
+Service.belongsTo(Node, { foreignKey: 'node_id', as: 'node', attributes: ['id', 'name', 'host', 'api_user', 'status', 'ssh_host', 'server_ip', 'nat_bridge', 'ipv6_bridge'] })
+Service.belongsTo(Product, { foreignKey: 'product_id', as: 'product' })
+Service.belongsTo(Plan, { foreignKey: 'plan_id', as: 'plan' })
 Service.hasMany(DomainBinding, { foreignKey: 'service_id' })
 Service.hasMany(PortForward, { foreignKey: 'service_id' })
 
@@ -269,9 +286,19 @@ User.hasMany(PortForward, { foreignKey: 'user_id' })
 PortForward.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
 PortForward.belongsTo(Service, { foreignKey: 'service_id', as: 'service' })
 
+const Backup = sequelize.define('Backup', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(255), allowNull: false },
+  type: { type: DataTypes.STRING(50) },
+  size: { type: DataTypes.STRING(50) },
+  path: { type: DataTypes.STRING(500) },
+  status: { type: DataTypes.ENUM('completed', 'failed', 'running'), defaultValue: 'completed' },
+  message: { type: DataTypes.TEXT }
+}, { tableName: 'admin_backups', timestamps: true })
+
 module.exports = {
   sequelize,
   User, Service, Product, Plan, Order, Node, Image,
   Ticket, TicketMessage, Announcement, Recharge, Voucher,
-  BalanceLog, Config, AuthRequest, DomainBinding, PortForward
+  BalanceLog, Config, AuthRequest, DomainBinding, PortForward, Backup
 }

@@ -105,13 +105,14 @@ router.delete('/users/:id', auth, admin, async (req, res) => {
 router.post('/users/:id/reset-balance', auth, admin, async (req, res) => {
   try {
     const { type, amount, note } = req.body
+    const amt = parseFloat(amount) || 0
     const user = await User.findByPk(req.params.id)
     
     const oldBalance = user.balance
     let newBalance = oldBalance
     
-    if (type === 'add') newBalance = oldBalance + amount
-    else if (type === 'reduce') newBalance = oldBalance - amount
+    if (type === 'add') newBalance = oldBalance + amt
+    else if (type === 'reduce') newBalance = oldBalance - amt
     else if (type === 'set') newBalance = amount
     
     await user.update({ balance: newBalance })
@@ -119,7 +120,7 @@ router.post('/users/:id/reset-balance', auth, admin, async (req, res) => {
     await BalanceLog.create({
       user_id: user.id,
       type: 'adjust',
-      amount: newBalance - oldBalance,
+      amount: parseFloat(newBalance - oldBalance) || 0,
       balance_before: oldBalance,
       balance_after: newBalance,
       note: note || '管理员调整'
@@ -135,12 +136,33 @@ router.post('/users/:id/reset-balance', auth, admin, async (req, res) => {
 router.post('/users/:id/impersonate', auth, admin, async (req, res) => {
   try {
     const jwt = require('jsonwebtoken')
-    const user = await User.findByPk(req.params.id)
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' })
-    res.json({ code: 200, data: { token } })
+    const user = await User.findByPk(req.params.id, {
+      attributes: { exclude: ['password'] }
+    })
+    if (!user) {
+      return res.json({ code: 404, message: '用户不存在' })
+    }
+    const token = jwt.sign(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET || 'cloudhost-secret-key',
+      { expiresIn: '1h' }
+    )
+    res.json({
+      code: 200,
+      message: '代登录Token已生成，请在浏览器控制台使用',
+      data: {
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role: user.role
+        }
+      }
+    })
   } catch (error) {
-    console.error(error)
-    res.json({ code: 500, message: '操作失败' })
+    console.error('[Admin] Impersonate error:', error)
+    res.json({ code: 500, message: '操作失败: ' + error.message })
   }
 })
 
@@ -172,6 +194,7 @@ router.get('/orders', auth, admin, async (req, res) => {
 router.post('/orders/:id/process', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     
     const order = await Order.findByPk(req.params.id, {
       include: [{ model: Plan, as: 'plan' }]
@@ -217,7 +240,7 @@ router.post('/orders/:id/process', auth, admin, async (req, res) => {
     const expireTime = dayjs().add(days, 'day').toDate()
     
     // 创建服务记录
-    await Service.create({
+    const service = await Service.create({
       user_id: order.user_id,
       node_id: order.node_id,
       product_id: order.product_id,
@@ -233,6 +256,14 @@ router.post('/orders/:id/process', auth, admin, async (req, res) => {
       expire_time: expireTime
     })
     
+    // Auto-assign port forwards
+    try {
+      const pfResult = await createAutoPortForwards(service, order.node_id)
+      console.log('Auto-assigned ports for service', service.id, JSON.stringify(pfResult))
+    } catch (pfError) {
+      console.error('Port forward assignment failed:', pfError.message)
+    }
+    
     res.json({ 
       code: 200, 
       message: `订单处理成功 (VMID: ${pveResult.vmid})`,
@@ -245,6 +276,27 @@ router.post('/orders/:id/process', auth, admin, async (req, res) => {
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: '处理失败: ' + error.message })
+  }
+})
+
+
+// Cancel order (admin)
+router.post('/orders/:id/cancel', auth, admin, async (req, res) => {
+  try {
+    const order = await Order.findByPk(req.params.id)
+    if (!order) return res.json({ code: 404, message: '订单不存在' })
+    
+    if (!['pending'].includes(order.status)) {
+      return res.json({ code: 400, message: '只有待支付状态的订单可以取消' })
+    }
+    
+    order.status = 'cancelled'
+    await order.save()
+    
+    res.json({ code: 200, message: '订单已取消' })
+  } catch (error) {
+    console.error('[Admin] Cancel order error:', error)
+    res.json({ code: 500, message: '取消订单失败: ' + error.message })
   }
 })
 
@@ -404,6 +456,7 @@ router.delete('/nodes/:id', auth, admin, async (req, res) => {
 router.post('/nodes/:id/sync', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     const node = await Node.findByPk(req.params.id)
     await vmService.syncNode(node)
     res.json({ code: 200, message: '同步成功' })
@@ -413,9 +466,30 @@ router.post('/nodes/:id/sync', auth, admin, async (req, res) => {
   }
 })
 
+
+router.post("/nodes/:id/test-pve", auth, admin, async (req, res) => {
+  try {
+    const node = await Node.findByPk(req.params.id);
+    if (!node) return res.json({ code: 404, message: "节点不存在" });
+    
+    const { vmService, PVEClient } = require("../services/vm");
+    const client = new PVEClient(node);
+    
+    try {
+      const status = await client.getNodeStatus();
+      res.json({ success: true, message: "PVE API 连接成功", data: status });
+    } catch (err) {
+      res.json({ success: false, message: "PVE API 连接失败: " + err.message });
+    }
+  } catch (error) {
+    console.error(error);
+    res.json({ code: 500, message: "测试 PVE 连接失败" });
+  }
+});
 router.post('/nodes/:id/sync-images', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     const node = await Node.findByPk(req.params.id)
     if (!node) return res.json({ code: 404, message: '节点不存在' })
     
@@ -709,6 +783,7 @@ router.post('/services/:id/transfer', auth, admin, async (req, res) => {
 router.post('/services/:id/start', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     const service = await Service.findByPk(req.params.id)
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
@@ -725,6 +800,7 @@ router.post('/services/:id/start', auth, admin, async (req, res) => {
 router.post('/services/:id/stop', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     const service = await Service.findByPk(req.params.id)
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
@@ -741,6 +817,7 @@ router.post('/services/:id/stop', auth, admin, async (req, res) => {
 router.post('/services/:id/restart', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     const service = await Service.findByPk(req.params.id)
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
@@ -757,6 +834,7 @@ router.post('/services/:id/restart', auth, admin, async (req, res) => {
 router.delete('/services/:id', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     
     const service = await Service.findByPk(req.params.id)
     
@@ -787,10 +865,12 @@ router.delete('/services/:id', auth, admin, async (req, res) => {
 router.post('/services/custom-create', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
+const { createAutoPortForwards } = require('../services/portForward')
     
     const {
       user_id, node_id, name, type, cpu, memory, disk,
-      ipv4, ipv6, os, template, iso, clone_from_vmid, os_type
+      ipv4, ipv6, os, template, iso, clone_from_vmid, os_type,
+      price, amount
     } = req.body
     
     // 验证节点是否存在
@@ -827,6 +907,83 @@ router.post('/services/custom-create', auth, admin, async (req, res) => {
     }
     
     // 在数据库中创建服务记录
+    // Auto-assign IPv4 and IPv6 from node network config if not specified
+    let assignedIpv4 = ipv4 || '';
+    let assignedIpv6 = ipv6 || '';
+    
+    if (!assignedIpv4 && node.nat_subnet) {
+      try {
+        const mysql = require('mysql2/promise');
+        const conn = await mysql.createConnection({ 
+          host: 'localhost', 
+          user: 'root',
+          password: 'cloudhost123',
+          database: 'cloudhost'
+        });
+        const [rows] = await conn.execute(
+          "SELECT ipv4 FROM services WHERE node_id = ? AND ipv4 != '' AND ipv4 IS NOT NULL ORDER BY CAST(SUBSTRING_INDEX(ipv4, '.', -1) AS UNSIGNED) ASC",
+          [node_id]
+        );
+        conn.close();
+        
+        const usedOctets = rows.map(r => parseInt(r.ipv4.split('.').pop())).sort((a,b) => a - b);
+        const subnet = node.nat_subnet;
+        const baseIp = subnet.split('/')[0];
+        const baseParts = baseIp.split('.').slice(0, 3);
+        
+        let found = false;
+        for (let i = 2; i <= 254; i++) {
+          if (!usedOctets.includes(i)) {
+            assignedIpv4 = baseParts.join('.') + '.' + i;
+            found = true;
+            break;
+          }
+        }
+        if (!found) console.error('No available IPv4 in subnet', subnet);
+      } catch (err) {
+        console.error('Auto-assign IPv4 failed:', err.message);
+      }
+    }
+    
+    if (!assignedIpv6 && node.ipv6_subnet) {
+      try {
+        const mysql = require('mysql2/promise');
+        const conn = await mysql.createConnection({ 
+          host: 'localhost', 
+          user: 'root',
+          password: 'cloudhost123',
+          database: 'cloudhost'
+        });
+        const [rows] = await conn.execute(
+          "SELECT ipv6 FROM services WHERE node_id = ? AND ipv6 != '' AND ipv6 IS NOT NULL ORDER BY id ASC",
+          [node_id]
+        );
+        conn.close();
+        
+        const subnet = node.ipv6_subnet;
+        const prefix = subnet.split('/')[0].split(':').slice(0, 4).join(':');
+        const usedSuffixes = rows.map(r => {
+          const parts = r.ipv6.split(':');
+          return parts.slice(4).join(':') || '::1';
+        });
+        
+        let counter = 2;
+        let found = false;
+        while (!found && counter < 256) {
+          const suffix = counter.toString(16);
+          const candidate = prefix + '::' + suffix;
+          if (!usedSuffixes.includes(suffix) && !usedSuffixes.includes(candidate)) {
+            assignedIpv6 = candidate;
+            found = true;
+          }
+          counter++;
+        }
+        if (!found) console.error('No available IPv6 in subnet', subnet);
+      } catch (err) {
+        console.error('Auto-assign IPv6 failed:', err.message);
+      }
+    }
+    
     const service = await Service.create({
       user_id: user_id,
       node_id: node_id,
@@ -837,18 +994,28 @@ router.post('/services/custom-create', auth, admin, async (req, res) => {
       memory: memory || 1024,
       disk: disk || 20,
       vmid: String(pveResult.vmid),
-      ipv4: ipv4 || '',
-      ipv6: ipv6 || '',
+      ipv4: assignedIpv4 || '',
+      ipv6: assignedIpv6 || '',
       os: os || 'Unknown',
-      price: 0,
+      price: price != null ? parseFloat(price) : (amount != null ? parseFloat(amount) : 0.00),
       expire_time: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
     })
+    
+    // Auto-assign port forwards
+    let pfResult = null
+    try {
+      pfResult = await createAutoPortForwards(service, node_id)
+      console.log('Auto-assigned ports for service', service.id, JSON.stringify(pfResult))
+    } catch (pfError) {
+      console.error('Port forward assignment failed:', pfError.message)
+    }
     
     res.json({
       code: 200,
       message: `虚拟机创建成功 (${pveResult.message})`,
       data: {
         service: service,
+        port_forwards: pfResult || null,
         pve_result: {
           vmid: pveResult.vmid,
           type: pveResult.type,
@@ -902,7 +1069,7 @@ router.put('/configs', auth, admin, async (req, res) => {
     const hasSmtpChange = Object.keys(configs).some(k => smtpKeys.includes(k))
     if (hasSmtpChange) {
       const { initTransporter } = require('../services/email')
-      await initTransporter()
+      await emailService.initTransporter()
     }
     res.json({ code: 200, message: '保存成功' })
   } catch (error) {
@@ -938,8 +1105,8 @@ router.put("/configs/update-single", auth, admin, async (req, res) => {
     const smtpKeys = ["smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_secure", "smtp_from"]
     const hasSmtpChange = smtpKeys.includes(key)
     if (hasSmtpChange) {
-      const { initTransporter } = require("../services/email")
-      await initTransporter()
+      const emailService = require("../services/email")
+      await emailService.initTransporter()
     }
     res.json({ code: 200, message: "保存成功" })
   } catch (error) {
@@ -958,14 +1125,14 @@ router.post("/configs/test-template-email", auth, admin, async (req, res) => {
     if (!template_name) {
       return res.json({ code: 400, message: "请提供模板名称" })
     }
-    const { sendTemplateEmail, initTransporter, emailTemplates } = require("../services/email")
-    await initTransporter()
+    const emailService = require("../services/email")
+    await emailService.initTransporter()
     
-    if (!emailTemplates[template_name]) {
+    if (!emailService.templates[template_name]) {
       return res.json({ code: 400, message: "模板不存在" })
     }
     
-    const result = await sendTemplateEmail(to, template_name, { site_name: "CloudHost", ...variables })
+    const result = await emailService.sendTemplate(to, template_name, { site_name: "CloudHost", ...variables })
     if (result) {
       res.json({ code: 200, message: "模板邮件发送成功" })
     } else {
@@ -977,20 +1144,34 @@ router.post("/configs/test-template-email", auth, admin, async (req, res) => {
   }
 })
 
+router.post("/configs/test-smtp", auth, admin, async (req, res) => {
+  try {
+    const { smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure } = req.body
+    const emailService = require("../services/email")
+    await emailService.initTransporter({
+      host: smtp_host || process.env.SMTP_HOST,
+      port: smtp_port ? parseInt(smtp_port) : parseInt(process.env.SMTP_PORT) || 465,
+      user: smtp_user || process.env.SMTP_USER,
+      pass: smtp_pass || process.env.SMTP_PASS,
+      secure: smtp_secure !== undefined ? smtp_secure === true : process.env.SMTP_SECURE === 'true'
+    })
+    res.json({ code: 200, message: "SMTP 连接测试成功" })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: "SMTP 连接失败: " + error.message })
+  }
+})
+
 router.post("/configs/test-email", auth, admin, async (req, res) => {
   try {
     const { to } = req.body
     if (!to) {
       return res.json({ code: 400, message: "请提供收件人邮箱" })
     }
-    const { sendEmail, initTransporter } = require("../services/email")
-    await initTransporter()
-    const result = await sendEmail(
-      to,
-      "CloudHost 测试邮件",
-      "这是一封测试邮件，如果您收到了，说明邮件服务配置正确。",
-      "<h1>测试邮件</h1><p>如果您看到这封邮件，说明邮件服务配置正确。</p>"
-    )
+    const emailService = require("../services/email")
+    await emailService.initTransporter()
+    const html = `<h1>测试邮件</h1><p>如果您看到这封邮件，说明邮件服务配置正确。</p>`
+    const result = await emailService.send(to, "CloudHost 测试邮件", html)
     if (result) {
       res.json({ code: 200, message: "邮件发送成功" })
     } else {

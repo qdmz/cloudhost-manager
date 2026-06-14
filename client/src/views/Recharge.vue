@@ -77,7 +77,7 @@
           <a-list :data-source="records" :loading="recordsLoading" size="small">
             <template #renderItem="{ item }">
               <a-list-item>
-                <a-list-item-meta :title="`充值 ¥${item.amount}`" :description="formatDate(item.created_at)" />
+                <a-list-item-meta :title="`充值 ¥${item.amount}`" :description="formatDate(item.createdAt)" />
                 <template #extra>
                   <a-tag :color="item.status === 'completed' ? 'success' : 'processing'">
                     {{ item.status === 'completed' ? '成功' : '处理中' }}

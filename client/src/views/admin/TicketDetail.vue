@@ -22,7 +22,7 @@
           <div class="message-content">
             <div class="message-header">
               <span class="sender">{{ msg.is_admin ? '客服' : msg.user?.username || '用户' }}</span>
-              <span class="time">{{ formatDate(msg.created_at) }}</span>
+              <span class="time">{{ formatDate(msg.createdAt) }}</span>
             </div>
             <div class="message-body" v-html="formatContent(msg.content)"></div>
           </div>
@@ -73,7 +73,7 @@ const ticketInfo = computed(() => {
     { label: '用户', value: ticket.value.user?.username || '未知' },
     { label: '分类', value: getCategoryText(ticket.value.category) },
     { label: '状态', value: getStatusText(ticket.value.status) },
-    { label: '创建时间', value: formatDate(ticket.value.created_at) },
+    { label: '创建时间', value: formatDate(ticket.value.createdAt) },
     { label: '更新时间', value: formatDate(ticket.value.updated_at) }
   ]
 })

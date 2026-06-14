@@ -47,6 +47,33 @@
             <a-select-option value="error">异常</a-select-option>
           </a-select>
         </a-form-item>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="IPv4 地址">
+              <a-input v-model:value="editForm.ipv4" placeholder="如: 192.168.1.100" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="IPv6 地址">
+              <a-input v-model:value="editForm.ipv6" placeholder="如: 2001:db8::1" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="SSH 端口">
+              <a-input-number v-model:value="editForm.ssh_port" :min="1" :max="65535" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="VNC 端口">
+              <a-input-number v-model:value="editForm.vnc_port" :min="1" :max="65535" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="MAC 地址">
+          <a-input v-model:value="editForm.mac" placeholder="如: BC:24:11:00:00:01" />
+        </a-form-item>
       </a-form>
     </a-modal>
     
@@ -146,7 +173,7 @@ const fetchServices = async () => {
 }
 
 const viewDetail = (record) => {
-  router.push(`/service/${record.id}`)
+  router.push(`/services/${record.id}`)
 }
 
 const openEditModal = (record) => {

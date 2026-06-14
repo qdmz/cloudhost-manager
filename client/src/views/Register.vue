@@ -73,6 +73,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import axios from 'axios'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { message } from 'ant-design-vue'
@@ -93,20 +94,21 @@ const form = ref({
   agree: false
 })
 const captchaImage = ref('')
+const captchaAxios = axios.create({ baseURL: '/api', timeout: 30000 })
 const loading = ref(false)
 
 const fetchCaptcha = async () => {
   try {
-    const res = await request.get('/captcha', {
-      responseType: 'blob'
-    })
+    const res = await captchaAxios.get('/captcha', { responseType: 'arraybuffer' })
     form.value.captcha_key = res.headers?.['x-captcha-key'] || ''
-    const blob = res.data
+    const blob = new Blob([res.data], { type: 'image/svg+xml' })
     captchaImage.value = URL.createObjectURL(blob)
   } catch (error) {
     console.error('获取验证码失败', error)
   }
 }
+
+
 
 const refreshCaptcha = () => {
   form.value.captcha_code = ''
