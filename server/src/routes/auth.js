@@ -85,7 +85,10 @@ router.post("/login", validateCaptcha, async (req, res) => {
       return res.json({ code: 400, message: "请填写用户名和密码" });
     }
 
-    const user = await User.findOne({ where: { username } });
+    // Support both username and email login
+    const user = await User.findOne({
+      where: { $or: [{ username }, { email }] }
+    });
 
     if (!user) {
       return res.json({ code: 401, message: "用户名或密码错误" });

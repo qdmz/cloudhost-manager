@@ -1,6 +1,6 @@
 const express = require('express')
 const router = express.Router()
-const { Service, Node } = require('../models')
+const { Service, Node, Product, Plan, User, BalanceLog, Order } = require('../models')
 const { auth } = require('../middleware/auth')
 const { vmService } = require('../services/vm')
 
@@ -143,22 +143,127 @@ router.post('/:id/reinstall', auth, async (req, res) => {
 // Renew service
 router.post('/:id/renew', auth, async (req, res) => {
   try {
+    const { User, BalanceLog, Order } = require('../models')
     const service = await Service.findOne({
-      where: { id: req.params.id, user_id: req.userId }
+      where: { id: req.params.id, user_id: req.userId },
+      include: [{ model: Product, as: 'product' }, { model: Plan, as: 'plan' }, { model: Node, as: 'node' }]
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
     
-    const { days, cycle } = req.body
-    const daysVal = days || (cycle ? parseInt(cycle) : 30)
-    await service.update({
-      expire_time: new Date(service.expire_time.getTime() + daysVal * 86400000)
+    const { cycle, payment_method } = req.body
+    
+    // Calculate days based on cycle
+    let days = 30
+    if (cycle === 'quarterly') days = 90
+    if (cycle === 'yearly') days = 365
+    if (cycle === 'monthly') days = 30
+    if (cycle === 'week') days = 7
+    if (cycle === 'day') days = 1
+    
+    // Calculate price
+    let price = 0
+    if (service.plan) {
+      price = parseFloat(service.plan.price_monthly)
+      if (cycle === 'quarterly') price = parseFloat(service.plan.price_quarterly || service.plan.price_monthly * 3)
+      if (cycle === 'yearly') price = parseFloat(service.plan.price_yearly || service.plan.price_monthly * 12)
+    }
+    // Fallback: if no plan price, use a default
+    if (price <= 0) price = 10
+    
+    // Apply 5% discount for quarterly/yearly
+    if (cycle === 'quarterly') price = price * 0.95
+    if (cycle === 'yearly') price = price * 0.9
+    
+    const user = await User.findByPk(req.userId)
+    
+    // Balance payment - direct renewal with balance deduction
+    if (payment_method === 'balance') {
+      if (parseFloat(user.balance) < price) {
+        return res.json({ code: 400, message: '余额不足，需要 ¥' + price.toFixed(2) })
+      }
+      
+      const newBalance = parseFloat(user.balance) - price
+      
+      await user.sequelize.transaction(async (t) => {
+        await user.update({ balance: newBalance }, { transaction: t })
+        await service.update({
+          expire_time: new Date(service.expire_time.getTime() + days * 86400000)
+        }, { transaction: t })
+        await BalanceLog.create({
+          user_id: req.userId,
+          type: 'consume',
+          amount: -price,
+          balance_before: parseFloat(user.balance),
+          balance_after: newBalance,
+          note: '服务续费: ' + service.name,
+          related_id: service.id,
+          related_type: 'service'
+        }, { transaction: t })
+      })
+      
+      return res.json({ code: 200, message: '续费成功，已使用余额 ¥' + price.toFixed(2) })
+    }
+    
+    // External payment - create order
+    const { v4: uuidv4 } = require('uuid')
+    const epayService = require('../services/epay')
+    
+    const orderNo = 'ORD' + Date.now() + uuidv4().substring(0, 8).toUpperCase()
+    const order = await Order.create({
+      user_id: req.userId,
+      order_no: orderNo,
+      product_id: service.product_id,
+      plan_id: service.plan_id,
+      node_id: service.node_id,
+      cycle: cycle,
+      quantity: 1,
+      amount: price,
+      status: 'pending',
+      payment_method: payment_method
     })
     
-    res.json({ code: 200, message: '续期成功' })
+    // Create payment URL
+    const payUrl = await epayService.createPayment(
+      orderNo,
+      '续费 ' + service.name,
+      price.toString(),
+      payment_method
+    )
+    
+    if (payUrl) {
+      res.json({ code: 200, message: '正在跳转支付', data: { pay_url: payUrl, order_no: orderNo, amount: price } })
+    } else {
+      // EPAY not configured - still deduct balance and extend
+      if (parseFloat(user.balance) < price) {
+        await order.update({ status: 'failed', fail_reason: '余额不足' })
+        return res.json({ code: 400, message: '余额不足，需要 ¥' + price.toFixed(2) })
+      }
+      
+      const newBalance = parseFloat(user.balance) - price
+      await user.sequelize.transaction(async (t) => {
+        await order.update({ status: 'paid', paid_at: new Date(), payment_method: 'manual' }, { transaction: t })
+        await user.update({ balance: newBalance }, { transaction: t })
+        await service.update({
+          expire_time: new Date(service.expire_time.getTime() + days * 86400000)
+        }, { transaction: t })
+        await BalanceLog.create({
+          user_id: req.userId,
+          type: 'consume',
+          amount: -price,
+          balance_before: parseFloat(user.balance),
+          balance_after: newBalance,
+          note: '服务续费（EPAY未配置，手动处理）: ' + service.name,
+          related_id: service.id,
+          related_type: 'service'
+        }, { transaction: t })
+      })
+      
+      return res.json({ code: 200, message: '续费成功（支付配置未就绪，已手动扣费处理）' })
+    }
   } catch (error) {
     console.error('[Services] Renew error:', error)
-    res.json({ code: 500, message: '续期失败: ' + error.message })
+    res.json({ code: 500, message: '续费失败: ' + error.message })
   }
 })
 

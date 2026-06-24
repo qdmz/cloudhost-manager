@@ -67,6 +67,7 @@ async function getNodeResources(node) {
 
 const axios = require('axios')
 const { Node, Image, Service, User } = require('../models')
+const { Op } = require("sequelize")
 
 class VMService {
   constructor() {
@@ -135,7 +136,8 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    return await client.getVMStats(service.vmid)
+    if (!service.vmid) return { cpu: 0, memory: 0, disk: 0, network_usage: N/A }
+    return await client.getVMStats(service.vmid, service.type)
   }
   
   async getVNCUrl(service) {
@@ -143,12 +145,14 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    return await client.getVNCUrl(service.vmid)
+    if (!service.vmid) throw new Error(虚拟机未创建)
+    return await client.getVNCUrl(service.vmid, service.type)
   }
   
   async getConsoleUrl(service) {
+    const endpoint = service.type === 'lxc' ? 'lxc' : 'qemu'
     return {
-      vnc_url: `ws://localhost:8006/api2/json/nodes/pve/qemu/${service.vmid}/spiceproxy`,
+      vnc_url: `ws://localhost:8006/api2/json/nodes/pve/${endpoint}/${service.vmid}/spiceproxy`,
       token: `vnc-${service.id}-${Date.now()}`
     }
   }
@@ -168,6 +172,7 @@ class VMService {
     await this.syncVMsFromNode(node)
   }
 
+
   async syncVMsFromNode(node) {
     const client = await this.getClient(node)
     
@@ -182,14 +187,31 @@ class VMService {
       defaultUser = await User.findOne()
     }
     
-    const syncedServices = []
+    // 收集 PVE 上实际存在的 vmid 列表
+    const pveVmidSet = new Set(allVMs.map(vm => vm.vmid))
+    
+    // 1. 同步/更新/创建 VM 记录
     for (const vm of allVMs) {
-      const [existing] = await Service.findOrCreate({
-        where: { 
-          node_id: node.id, 
-          vmid: vm.vmid 
-        },
-        defaults: {
+      const existing = await Service.findOne({
+        where: { node_id: node.id, vmid: vm.vmid }
+      })
+      
+      if (existing) {
+        // 强制更新已有记录（方案B）
+        await existing.update({
+          name: vm.name || existing.name,
+          type: vm.type,
+          status: vm.status,
+          cpu: vm.cpu || existing.cpu,
+          memory: vm.memory || existing.memory,
+          disk: vm.disk || existing.disk,
+          ipv4: vm.ipv4 || existing.ipv4,
+          ipv6: vm.ipv6 || existing.ipv6,
+          os: vm.os || existing.os
+        })
+      } else {
+        // 创建新记录
+        await Service.create({
           user_id: defaultUser ? defaultUser.id : 1,
           node_id: node.id,
           name: vm.name || `VM-${vm.vmid}`,
@@ -203,14 +225,27 @@ class VMService {
           ipv6: vm.ipv6,
           os: vm.os || 'Unknown',
           price: 0,
-          expire_time: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 默认1年后过期
-        }
-      })
-      syncedServices.push(existing)
+          expire_time: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+        })
+      }
     }
     
-    return syncedServices
+    // 2. 清理 PVE 上已不存在的 VM 记录（孤儿清理）
+    const orphanServices = await Service.findAll({
+      where: {
+        node_id: node.id,
+        vmid: { [Op.notIn]: Array.from(pveVmidSet) }
+      }
+    })
+    for (const orphan of orphanServices) {
+      await orphan.destroy()
+      console.log(`[Sync] 删除孤儿服务记录: node=${node.name}, vmid=${orphan.vmid}`)
+    }
+    
+    return allVMs
   }
+
+
 
   async syncImagesFromNode(node) {
     const client = await this.getClient(node)
@@ -220,14 +255,27 @@ class VMService {
     
     const allImages = [...lxcImages, ...isoImages]
     
-    const syncedImages = []
+    // 收集 PVE 上实际存在的 template 列表
+    const pveTemplateSet = new Set(allImages.map(img => img.template))
+    
+    // 1. 同步/更新/创建 镜像记录
     for (const img of allImages) {
-      const [existing] = await Image.findOrCreate({
-        where: { 
-          node_id: node.id, 
-          template: img.template 
-        },
-        defaults: {
+      const existing = await Image.findOne({
+        where: { node_id: node.id, template: img.template }
+      })
+      
+      if (existing) {
+        // 强制更新已有记录
+        await existing.update({
+          name: img.name || existing.name,
+          os: img.os || existing.os,
+          version: img.version || existing.version,
+          arch: img.arch || existing.arch,
+          status: img.status || 'active'
+        })
+      } else {
+        // 创建新记录
+        await Image.create({
           node_id: node.id,
           name: img.name,
           os: img.os,
@@ -235,13 +283,25 @@ class VMService {
           arch: img.arch || 'amd64',
           template: img.template,
           status: 'active'
-        }
-      })
-      syncedImages.push(existing)
+        })
+      }
     }
     
-    return syncedImages
+    // 2. 清理 PVE 上已不存在的镜像记录（孤儿清理）
+    const orphanImages = await Image.findAll({
+      where: {
+        node_id: node.id,
+        template: { [Op.notIn]: Array.from(pveTemplateSet) }
+      }
+    })
+    for (const orphan of orphanImages) {
+      await orphan.destroy()
+      console.log(`[Sync] 删除孤儿镜像记录: node=${node.name}, template=${orphan.template}`)
+    }
+    
+    return allImages
   }
+
 
   // 创建虚拟机（真正在PVE上创建）
   async createVM(nodeId, options) {
@@ -350,11 +410,17 @@ class VMService {
         features: 'nesting=1'
       }
 
-      // Ensure template has proper path
+      // Ensure template has proper path and map to actual PVE template
       if (options.template) {
         let template = options.template;
         if (!template.includes(':')) {
-          template = 'local:vztmpl/' + template;
+          // Map common template names to actual PVE template filenames
+          const templateMap = {
+            'debian-12': 'local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst',
+            'ubuntu-22.04': 'local:vztmpl/ubuntu-22.04-default',
+            'ubuntu-24.04': 'local:vztmpl/ubuntu-24.04-default',
+          };
+          template = templateMap[template] || 'local:vztmpl/' + template;
         }
         config.ostemplate = template;
       }
@@ -629,6 +695,9 @@ class PVEClient {
     this.nodeName = 'pve'
     this.ticket = null
     this.csrfToken = null
+    this.sshUser = node.ssh_username || "root"
+    this.sshHost = node.ssh_host || node.host.replace(/^https?:\/\//, "").replace(/:\d+$/, "")
+    this.sshPort = node.ssh_port || 22
   }
   
   async request(method, path, params = null) {
@@ -781,8 +850,9 @@ class PVEClient {
     return await this.request('POST', `/nodes/${this.nodeName}/qemu/${vmid}/status/stop`)
   }
   
-  async getVMStats(vmid) {
-    const data = await this.request('GET', `/nodes/${this.nodeName}/qemu/${vmid}/status/current`)
+  async getVMStats(vmid, type) {
+    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
+    const data = await this.request('GET', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/current`)
     
     return {
       cpu: Math.round((data.cpu || 0) * 100),
@@ -792,11 +862,12 @@ class PVEClient {
     }
   }
   
-  async getVNCUrl(vmid) {
-    const data = await this.request('POST', `/nodes/${this.nodeName}/qemu/${vmid}/vncproxy`)
+  async getVNCUrl(vmid, type) {
+    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
+    const data = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/vncproxy`)
     
     return {
-      vnc_url: `${this.host}/api2/json/nodes/${this.nodeName}/qemu/${vmid}/vncwebsocket`,
+      vnc_url: `${this.host}/api2/json/nodes/${this.nodeName}/${endpoint}/${vmid}/vncwebsocket`,
       token: data.ticket,
       port: data.port
     }
@@ -856,7 +927,7 @@ class PVEClient {
           })
         }
       }
-      return { vmid: vmid, taskId: taskId }
+      return result
     } catch (error) {
       console.error('Failed to get QEMU VMs:', error.message)
       return []
@@ -901,7 +972,7 @@ class PVEClient {
           })
         }
       }
-      return { vmid: vmid, taskId: taskId }
+      return result
     } catch (error) {
       console.error('Failed to get LXC VMs:', error.message)
       return []
@@ -910,25 +981,66 @@ class PVEClient {
 
   async getNodeImages() {
     try {
-      const storages = await this.request('GET', '/cluster/resources', { type: 'storage' })
-      const localStorage = storages?.find(s => s.storage === 'local') || { storage: 'local' }
-      const data = await this.request('GET', `/nodes/${this.nodeName}/storage/local/content`, {
-        content: 'vztmpl'
-      })
-      
+      // Try PVE API first
+      const storages = await this.request('GET', `/nodes/${this.nodeName}/storage`)
       const images = []
-      for (const item of data || []) {
-        if (item.content === 'vztmpl') {
-          const [os, version] = this.parseOsFromTemplate(item.volid)
-          images.push({
-            name: item.volid.split('/').pop(),
-            os,
-            version,
-            arch: 'amd64',
-            template: item.volid
+      
+      for (const storage of storages || []) {
+        const storageName = storage.storage || storage.name
+        try {
+          const data = await this.request('GET', `/nodes/${this.nodeName}/storage/${storageName}/content`, {
+            content: 'vztmpl'
           })
+          
+          for (const item of data || []) {
+            if (item.content === 'vztmpl') {
+              const [os, version] = this.parseOsFromTemplate(item.volid)
+              images.push({
+                name: item.volid.split('/').pop(),
+                os,
+                version,
+                arch: 'amd64',
+                template: item.volid,
+                storage: storageName
+              })
+            }
+          }
+        } catch (err) {
+          continue
         }
       }
+      
+      if (images.length > 0) return images
+      
+      // Fallback: Try SSH
+      console.log('[Sync] PVE API unavailable, trying SSH for LXC images...')
+      const { execSync } = require('child_process')
+      const sshUser = this.sshUser || 'root'
+      const sshHost = this.sshHost || this.host.replace(/^https?:\/\//, '').replace(/:\d+$/, '')
+      const sshPort = this.sshPort || 22
+      
+      const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p ${sshPort} ${sshUser}@${sshHost} "pveam list local 2>/dev/null || ls -1 /var/lib/vz/template/cache/*.tar.* 2>/dev/null || echo no_images"`
+      const output = execSync(cmd, { encoding: 'utf8', timeout: 15000 })
+      
+      if (output.includes('no_images') || output.trim() === '') return []
+      
+      const lines = output.trim().split('\n').filter(l => l.includes(':') || l.endsWith('.tar.gz') || l.endsWith('.tar.xz') || l.endsWith('.tar.zst'))
+      for (const line of lines) {
+        let filename = line.trim()
+        if (line.includes(':')) {
+          filename = line.split(':')[1].trim()
+        }
+        const [os, version] = this.parseOsFromTemplate(filename)
+        images.push({
+          name: filename,
+          os,
+          version,
+          arch: 'amd64',
+          template: `local:vztmpl/${filename}`,
+          storage: 'local'
+        })
+      }
+      
       return images
     } catch (error) {
       console.error('Failed to get LXC images:', error.message)
@@ -938,23 +1050,65 @@ class PVEClient {
 
   async getIsoImages() {
     try {
-      const data = await this.request('GET', `/nodes/${this.nodeName}/storage/local/content`, {
-        content: 'iso'
-      })
-      
+      // Try PVE API first
+      const storages = await this.request('GET', `/nodes/${this.nodeName}/storage`)
       const images = []
-      for (const item of data || []) {
-        if (item.content === 'iso') {
-          const filename = item.volid.split('/').pop()
-          images.push({
-            name: filename,
-            os: 'ISO',
-            version: filename,
-            arch: 'amd64',
-            template: item.volid
+      
+      for (const storage of storages || []) {
+        const storageName = storage.storage || storage.name
+        try {
+          const data = await this.request('GET', `/nodes/${this.nodeName}/storage/${storageName}/content`, {
+            content: 'iso'
           })
+          
+          for (const item of data || []) {
+            if (item.content === 'iso') {
+              const filename = item.volid.split('/').pop()
+              images.push({
+                name: filename,
+                os: 'ISO',
+                version: filename,
+                arch: 'amd64',
+                template: item.volid,
+                storage: storageName
+              })
+            }
+          }
+        } catch (err) {
+          continue
         }
       }
+      
+      if (images.length > 0) return images
+      
+      // Fallback: Try SSH
+      console.log('[Sync] PVE API unavailable, trying SSH for ISO images...')
+      const { execSync } = require('child_process')
+      const sshUser = this.sshUser || 'root'
+      const sshHost = this.sshHost || this.host.replace(/^https?:\/\//, '').replace(/:\d+$/, '')
+      const sshPort = this.sshPort || 22
+      
+      const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p ${sshPort} ${sshUser}@${sshHost} "pveam list local:iso 2>/dev/null || ls -1 /var/lib/vz/import/*.iso 2>/dev/null || echo no_images"`
+      const output = execSync(cmd, { encoding: 'utf8', timeout: 15000 })
+      
+      if (output.includes('no_images') || output.trim() === '') return []
+      
+      const lines = output.trim().split('\n').filter(l => l.includes(':') || l.endsWith('.iso'))
+      for (const line of lines) {
+        let filename = line.trim()
+        if (line.includes(':')) {
+          filename = line.split(':')[1].trim()
+        }
+        images.push({
+          name: filename,
+          os: 'ISO',
+          version: filename,
+          arch: 'amd64',
+          template: `local:iso/${filename}`,
+          storage: 'local'
+        })
+      }
+      
       return images
     } catch (error) {
       console.error('Failed to get ISO images:', error.message)
