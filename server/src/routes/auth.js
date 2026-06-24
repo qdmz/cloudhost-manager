@@ -77,7 +77,7 @@ router.post("/register", validateCaptcha, async (req, res) => {
 });
 
 // Login
-router.post("/login", validateCaptcha, async (req, res) => {
+router.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -85,7 +85,10 @@ router.post("/login", validateCaptcha, async (req, res) => {
       return res.json({ code: 400, message: "请填写用户名和密码" });
     }
 
-    const user = await User.findOne({ where: { username } });
+    // Support both username and email login
+    const user = await User.findOne({
+      where: { [Op.or]: [{ username: username }, { email: username }] }
+    });
 
     if (!user) {
       return res.json({ code: 401, message: "用户名或密码错误" });
@@ -121,13 +124,13 @@ router.post("/login", validateCaptcha, async (req, res) => {
 // Forgot Password
 router.post("/forgot-password", validateCaptcha, async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email: username } = req.body;
 
     if (!email) {
       return res.json({ code: 400, message: "请输入注册邮箱" });
     }
 
-    const user = await User.findOne({ where: { email } });
+    const user = await User.findOne({ where: { email: username } });
 
     if (!user) {
       return res.json({ code: 404, message: "该邮箱未注册" });

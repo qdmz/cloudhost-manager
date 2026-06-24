@@ -27,7 +27,7 @@
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="选择节点" name="node_id" :rules="[{ required: true, message: '请选择节点' }]">
-              <a-select v-model:value="form.node_id" placeholder="选择节点">
+              <a-select v-model:value="form.node_id" @change="loadImagesForNode" placeholder="选择节点">
                 <a-select-option v-for="node in nodes" :key="node.id" :value="node.id">
                   {{ node.name }} ({{ node.type }})
                 </a-select-option>
@@ -197,16 +197,31 @@ const selectedUser = computed(() => users.value.find(u => u.id === form.value.us
 
 const fetchData = async () => {
   try {
-    const [usersRes, nodesRes, imagesRes] = await Promise.all([
+    const [usersRes, nodesRes] = await Promise.all([
       getUsers(),
-      getNodes(),
-      getImages()
+      getNodes()
     ])
     users.value = usersRes.data?.list || []
     nodes.value = Array.isArray(nodesRes.data) ? nodesRes.data : (nodesRes.data?.list || [])
-    images.value = Array.isArray(imagesRes.data) ? imagesRes.data : (imagesRes.data?.list || [])
+    images.value = []
   } catch (error) {
     console.error(error)
+  }
+}
+
+const loadImagesForNode = async (nodeId) => {
+  if (!nodeId) {
+    images.value = []
+    form.value.image_id = null
+    return
+  }
+  try {
+    const res = await getImages({ node_id: nodeId })
+    images.value = Array.isArray(res.data) ? res.data : (res.data?.list || [])
+    form.value.image_id = null
+  } catch (error) {
+    console.error("Failed to load images:", error)
+    images.value = []
   }
 }
 

@@ -278,7 +278,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
 import { getService, startService, stopService, restartService, resetPassword, reinstallSystem, renewService, getServiceStats } from '@/api/service'
@@ -316,6 +316,17 @@ const images = ref([])
 
 const passwordForm = ref({ password: '', confirm_password: '' })
 const reinstallForm = ref({ image_id: null })
+
+watch(() => showReinstallModal.value, async (val) => {
+  if (val && service.value) {
+    try {
+      const res = await axios.get('/api/services/' + service.value.id + '/images')
+      images.value = res.data?.data || []
+    } catch (e) {
+      console.error('Load images error:', e)
+    }
+  }
+})
 const renewForm = ref({ cycle: 'monthly', payment_method: 'balance' })
 
 const isExpiringSoon = computed(() => {
@@ -398,10 +409,6 @@ const fetchStats = async () => {
 const handleAction = async (action) => {
   try {
     if (action === 'vnc') {
-      if (!service.value?.ipv4) {
-        message.warning('IP地址未分配')
-        return
-      }
       // Use PVE spiceproxy for VNC - this works through PVE's web interface
       if (service.value.node?.id) {
         message.loading({ content: '正在打开VNC控制台...', duration: 0 })
@@ -502,11 +509,12 @@ const handleRenew = async () => {
 
 
 const openWebSSH = () => {
-  if (!service.value?.ipv4) {
-    message.warning('IP地址未分配')
+  if (!service.value?.node?.ssh_host && !service.value?.ssh_host && !service.value?.ipv4) {
+    message.warning('连接信息未配置')
     return
   }
-  const sshHost = service.value.ssh_host || service.value.ipv4
+  const hostname = service.value.node?.ssh_host || service.value.ssh_host || service.value.ipv4 || 'unknown'
+  const sshHost = hostname
   const sshPort = service.value.ssh_port || 22
   const user = service.value.ssh_username || 'root'
   const password = service.value.ssh_password || ''
@@ -545,15 +553,9 @@ const openSFTP = () => {
 }
 
 const openVNC = () => {
-  if (!service.value?.ipv4) {
-    message.warning('IP地址未分配')
-    return
-  }
-  // VNC is accessible via the node's websockify service
-  const sshHost = service.value.ssh_host || service.value.node?.ssh_host
-  const sshPort = service.value.ssh_port || 22
-  // Try connecting via node:port (port mapped to VM's VNC)
-  window.open(`//${window.location.hostname}:${window.location.port || 80}/vnc/?host=${sshHost}&port=${sshPort + 5900}`, '_blank')
+  const hostname = service.value.node?.ssh_host || service.value.ssh_host || window.location.hostname
+  console.log('Opening VNC for:', hostname, 'port:', service.value.vnc_port)
+  window.open(`https://${hostname}:8006/?console=novnc`, '_blank')
 }
 
 const copyToClipboard = (text, label) => {

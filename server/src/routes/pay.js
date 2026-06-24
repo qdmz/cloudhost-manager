@@ -23,9 +23,9 @@ async function processPaymentSuccess(order, tradeNo, userId) {
   for (let i = 0; i < (order.quantity || 1); i++) {
     let pveVmid = ''
     try {
-      const vmService = require('../services/vm')
+      const { vmService } = require('../services/vm')
       const pveResult = await vmService.createVM(order.node_id, {
-        name: `${product.name}-${i + 1}`,
+        name: (product.name || "VM").replace(/[^\w-]/g, "") + "-" + (i + 1),
         type: product.type || 'kvm',
         cpu: plan.cpu,
         memory: plan.memory,
@@ -46,7 +46,7 @@ async function processPaymentSuccess(order, tradeNo, userId) {
       product_id: order.product_id,
       plan_id: order.plan_id,
       order_id: order.id,
-      name: `${product.name}-${i + 1}`,
+      name: (product.name || "VM").replace(/[^\w-]/g, "") + "-" + (i + 1),
       type: product.type || 'kvm',
       status: 'running',
       cpu: plan.cpu,
@@ -54,6 +54,7 @@ async function processPaymentSuccess(order, tradeNo, userId) {
       disk: plan.disk,
       bandwidth: plan.bandwidth,
       vmid: pveVmid,
+      password: pveVmid ? password : '',
       price: parseFloat(order.amount) / (order.quantity || 1),
       expire_time: expireAt
     })

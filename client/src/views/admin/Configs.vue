@@ -164,21 +164,21 @@ const emailConfig = ref({
 // Email template management
 const emailTemplates = ref([])
 const templateColumns = [
-  { title: 模板名称, dataIndex: name, width: 150 },
-  { title: 邮件标题, dataIndex: subject, width: 200 },
-  { title: 操作, key: action, width: 80 }
+  { title: '模板名称', dataIndex: 'name', width: 150 },
+  { title: '邮件标题', dataIndex: 'subject', width: 200 },
+  { title: '操作', key: 'action', width: 80 }
 ]
 
 const fetchEmailTemplates = async () => {
   try {
     emailTemplates.value = [
-      { key: email_verify, name: 邮箱验证, subject: 邮箱验证 - CloudHost },
-      { key: password_reset, name: 重置密码, subject: 重置密码 - CloudHost },
-      { key: login_notify, name: 登录通知, subject: 登录通知 - CloudHost },
-      { key: order_notify, name: 订单通知, subject: 订单通知 - CloudHost },
-      { key: product_activated, name: 产品开通通知, subject: 服务已开通 - CloudHost },
-      { key: expiration_reminder, name: 到期提醒, subject: 到期提醒 - CloudHost },
-      { key: order_expire, name: 服务已到期, subject: 服务已到期 - CloudHost }
+      { key: 'email_verify', name: '邮箱验证', subject: '邮箱验证 - CloudHost' },
+      { key: 'password_reset', name: '重置密码', subject: '重置密码 - CloudHost' },
+      { key: 'login_notify', name: '登录通知', subject: '登录通知 - CloudHost' },
+      { key: 'order_notify', name: '订单通知', subject: '订单通知 - CloudHost' },
+      { key: 'product_activated', name: '产品开通通知', subject: '服务已开通 - CloudHost' },
+      { key: 'expiration_reminder', name: '到期提醒', subject: '到期提醒 - CloudHost' },
+      { key: 'order_expire', name: '服务已到期', subject: '服务已到期 - CloudHost' }
     ]
   } catch (e) {
     message.error('获取模板失败')

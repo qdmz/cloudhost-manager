@@ -208,15 +208,25 @@ const productForm = reactive({
 })
 
 const availableNodes = ref([])
-const osOptions = ref([
-  { label: 'Ubuntu 22.04', value: 'ubuntu-22.04' },
-  { label: 'Ubuntu 24.04', value: 'ubuntu-24.04' },
-  { label: 'Debian 12', value: 'debian-12' },
-  { label: 'CentOS 9', value: 'centos-9' },
-  { label: 'Windows Server 2022', value: 'windows-2022' },
-  { label: 'AlmaLinux 9', value: 'almalinux-9' },
-  { label: 'RockyLinux 9', value: 'rockylinux-9' }
-])
+const osOptions = ref([])
+
+const loadOsOptionsFromNode = async (nodeId) => {
+  if (!nodeId) {
+    osOptions.value = []
+    return
+  }
+  try {
+    const { getImages } = await import('@/api/admin')
+    const res = await getImages({ node_id: nodeId })
+    osOptions.value = (res.data?.list || res.data || []).map(img => ({
+      label: img.name,
+      value: img.template
+    }))
+  } catch (e) {
+    console.error('Failed to load OS options:', e)
+    osOptions.value = []
+  }
+}
 
 const fetchAvailableNodes = async () => {
   try {
