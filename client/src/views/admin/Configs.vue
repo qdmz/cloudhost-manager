@@ -11,24 +11,24 @@
           <a-form :model="siteConfig" layout="vertical">
             <a-row :gutter="16">
               <a-col :span="12">
-                <a-form-item label="网站名称" required>
+                <a-form-item label="网站名称">
                   <a-input v-model:value="siteConfig.site_name" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
-                <a-form-item label="网站URL" required>
-                  <a-input v-model:value="siteConfig.site_url" placeholder="https://example.com" />
+                <a-form-item label="网站地址">
+                  <a-input v-model:value="siteConfig.site_url" />
                 </a-form-item>
               </a-col>
             </a-row>
             <a-row :gutter="16">
               <a-col :span="12">
-                <a-form-item label="客服电话">
+                <a-form-item label="联系电话">
                   <a-input v-model:value="siteConfig.phone" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
-                <a-form-item label="客服QQ">
+                <a-form-item label="QQ">
                   <a-input v-model:value="siteConfig.qq" />
                 </a-form-item>
               </a-col>
@@ -46,24 +46,24 @@
           <a-form :model="emailConfig" layout="vertical">
             <a-row :gutter="16">
               <a-col :span="12">
-                <a-form-item label="SMTP 服务器" required>
+                <a-form-item label="SMTP 主机">
                   <a-input v-model:value="emailConfig.smtp_host" placeholder="smtp.qq.com" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
-                <a-form-item label="SMTP 端口" required>
-                  <a-input-number v-model:value="emailConfig.smtp_port" :min="1" :max="65535" style="width:100%" />
+                <a-form-item label="SMTP 端口">
+                  <a-input-number v-model:value="emailConfig.smtp_port" :min="1" :max="65535" style="width: 100%" />
                 </a-form-item>
               </a-col>
             </a-row>
             <a-row :gutter="16">
               <a-col :span="12">
-                <a-form-item label="SMTP 用户名" required>
+                <a-form-item label="SMTP 用户名">
                   <a-input v-model:value="emailConfig.smtp_user" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
-                <a-form-item label="SMTP 密码/授权码" required>
+                <a-form-item label="SMTP 密码">
                   <a-input-password v-model:value="emailConfig.smtp_pass" />
                 </a-form-item>
               </a-col>
@@ -88,30 +88,69 @@
             </a-form-item>
           </a-form>
           
-          <a-divider>邮件模板预览</a-divider>
+          <a-divider>邮件测试</a-divider>
           <a-space style="margin-bottom:16px">
-            <a-button @click="handleTestEmail('password_reset')" :loading="emailTesting">发送测试邮件</a-button>
-            <a-input-search placeholder="测试邮箱地址" v-model:value="testEmail" style="width:200px" />
+            <a-select v-model:value="selectedTemplate" style="width:200px" placeholder="选择模板">
+              <a-select-option v-for="t in emailTemplates" :key="t.key" :value="t.key">{{ t.name }}</a-select-option>
+            </a-select>
+            <a-input-search 
+              placeholder="测试邮箱地址" 
+              v-model:value="testEmail" 
+              style="width:250px" 
+              @search="handleTestEmail(selectedTemplate)"
+            />
           </a-space>
         </a-card>
       </a-tab-pane>
       
+      <!-- 邮件模板 -->
       <a-tab-pane key="email_template" tab="邮件模板">
-          <a-card>
-            <a-table :columns="templateColumns" :data-source="emailTemplates" row-key="key" :pagination="false">
-              <template #bodyCell="{ column, record }">
-                <template v-if="column.key === subject">
-                  <a-input v-model:value="record.subject" style="width:100%" />
-                </template>
-                <template v-else-if="column.key === action">
-                  <a-button size="small" @click="handleTestTemplate(record.key)">测试</a-button>
-                </template>
+        <a-card>
+          <a-alert message="以下模板为内置模板，内容不可编辑，仅可查看摘要。如需自定义请联系管理员。" type="info" show-icon style="margin-bottom:16px" />
+          
+          <a-table :columns="templateColumns" :data-source="emailTemplatesWithPreview" row-key="key" :pagination="false">
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'preview'">
+                <a-button size="small" @click="handleViewTemplate(record.key)">查看</a-button>
               </template>
-            </a-table>
-            <a-button type="primary" style="margin-top:16px" @click="handleSaveTemplates">保存所有模板</a-button>
-          </a-card>
-        </a-tab-pane>
-            <!-- 系统设置 -->
+              <template v-else-if="column.key === 'action'">
+                <a-button size="small" @click="handleTestTemplate(record.key)">测试</a-button>
+              </template>
+            </template>
+          </a-table>
+        </a-card>
+        
+        <!-- 模板详情弹窗 -->
+        <a-modal
+          v-model:open="templateModalVisible"
+          :title="currentTemplate.name"
+          width="700px"
+          :footer="null"
+        >
+          <a-descriptions bordered :column="1">
+            <a-descriptions-item label="模板名称">{{ currentTemplate.name }}</a-descriptions-item>
+            <a-descriptions-item label="邮件标题">
+              <a-input v-model:value="currentTemplate.subject" style="width:100%" />
+            </a-descriptions-item>
+            <a-descriptions-item label="模板内容预览">
+              <div style="background:#f5f5f5;padding:16px;border-radius:4px;max-height:400px;overflow:auto">
+                <pre style="white-space:pre-wrap;font-family:monospace;font-size:12px;margin:0">{{ currentTemplate.preview }}</pre>
+              </div>
+            </a-descriptions-item>
+          </a-descriptions>
+          <a-space style="margin-top:16px">
+            <a-button @click="handleTestTemplate(currentTemplate.key)">发送测试邮件</a-button>
+            <a-input-search 
+              placeholder="收件人邮箱" 
+              v-model:value="testEmailForTemplate"
+              style="width:250px"
+              @search="(v) => handleTestTemplate(currentTemplate.key)"
+            />
+          </a-space>
+        </a-modal>
+      </a-tab-pane>
+      
+      <!-- 系统设置 -->
       <a-tab-pane key="system" tab="系统设置">
         <a-card>
           <a-form :model="systemConfig" layout="vertical">
@@ -150,9 +189,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { getConfigs as apiGetConfigs, updateConfigSingle, testSmtp, testEmail as testEmailApi } from '@/api/admin'
+import { request } from '@/utils/request'
 
 const activeTab = ref('site')
 const allConfigs = ref({})
@@ -161,13 +201,33 @@ const emailConfig = ref({
   smtp_host: '', smtp_port: 465, smtp_user: '', smtp_pass: '', 
   smtp_from: '', smtp_secure: false 
 })
-// Email template management
+
+// Email templates
 const emailTemplates = ref([])
 const templateColumns = [
   { title: '模板名称', dataIndex: 'name', width: 150 },
-  { title: '邮件标题', dataIndex: 'subject', width: 200 },
-  { title: '操作', key: 'action', width: 80 }
+  { title: '标题', dataIndex: 'subject', width: 200 },
+  { title: '预览', key: 'preview', width: 300 },
+  { title: '操作', key: 'action', width: 120 }
 ]
+
+// Template preview data (matching backend email.js)
+const templatePreviewMap = {
+  email_verify: '邮箱验证码通知，包含验证码和有效期',
+  password_reset: '密码重置链接通知，包含重置按钮和有效期',
+  login_notify: '新设备登录通知，包含登录时间、IP、浏览器信息',
+  order_notify: '订单状态变更通知，包含商品、配置、金额信息',
+  product_activated: '服务开通通知，包含IP、SSH命令、密码、到期时间',
+  expiration_reminder: '服务到期提醒，包含剩余天数和到期时间',
+  order_expire: '服务已到期通知，包含续费引导'
+}
+
+const emailTemplatesWithPreview = computed(() => {
+  return emailTemplates.value.map(t => ({
+    ...t,
+    preview: templatePreviewMap[t.key] || '暂无预览'
+  }))
+})
 
 const fetchEmailTemplates = async () => {
   try {
@@ -185,27 +245,36 @@ const fetchEmailTemplates = async () => {
   }
 }
 
+// Template modal
+const templateModalVisible = ref(false)
+const currentTemplate = ref({})
+const testEmailForTemplate = ref('')
+
+const handleViewTemplate = (key) => {
+  const t = emailTemplates.value.find(x => x.key === key)
+  if (t) {
+    currentTemplate.value = { ...t, preview: templatePreviewMap[key] || '暂无预览' }
+    templateModalVisible.value = true
+  }
+}
+
 const handleTestTemplate = async (key) => {
+  const to = key === selectedTemplate.value ? testEmail.value : testEmailForTemplate.value
+  if (!to) {
+    return message.warning('请输入测试邮箱')
+  }
   try {
-    const { request } = await import('@/utils/request')
     await request.post('/admin/configs/test-template-email', {
       template: key,
-      to: emailConfig.value.smtp_user || ''
+      to: to
     })
-    message.success('测试邮件已发送')
+    message.success('测试邮件已发送到 ' + to)
   } catch (e) {
     message.error('发送失败: ' + (e.response?.data?.message || e.message))
   }
 }
 
-const handleSaveTemplates = async () => {
-  message.info('邮件模板为内置模板，修改请联系管理员')
-}
-
-const systemConfig = ref({ 
-  allow_register: true, require_auth: false, 
-  order_timeout: 15, default_commission: 10 
-})
+const selectedTemplate = ref('')
 const testEmail = ref('')
 const emailTesting = ref(false)
 
@@ -310,7 +379,6 @@ const handleTestEmail = async (template) => {
 
 onMounted(() => {
   fetchConfigs()
-  fetchEmailTemplates()
   fetchEmailTemplates()
 })
 </script>

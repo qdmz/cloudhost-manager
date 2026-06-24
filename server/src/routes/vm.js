@@ -31,41 +31,40 @@ router.post('/vncproxy/:node_id/:vmid', auth, async (req, res) => {
     let endpoint = 'qemu'
     let vmExists = false
     
-    console.log('[VNC] Checking VM', vmid, 'on node', node.name)
-    
     // Try QEMU first
     try {
-      console.log('[VNC] Trying qemu path...')
       const qemuResp = await pve.request('GET', '/nodes/' + node.name + '/qemu/' + vmid + '/config')
-      if (qemuResp && qemuResp.data) {
+      if (qemuResp) {
         endpoint = 'qemu'
         vmExists = true
-        console.log('[VNC] Found as QEMU')
       }
     } catch (e) {
-      console.log('[VNC] QEMU check failed:', e.message?.substring(0, 100))
       // Not a QEMU VM, try LXC
       try {
-        console.log('[VNC] Trying lxc path...')
         const lxcResp = await pve.request('GET', '/nodes/' + node.name + '/lxc/' + vmid + '/config')
-        if (lxcResp && lxcResp.data) {
+        if (lxcResp) {
           endpoint = 'lxc'
           vmExists = true
-          console.log('[VNC] Found as LXC')
         }
       } catch (e2) {
-        console.log('[VNC] LXC also failed:', e2.message?.substring(0, 100))
         return res.json({ code: 404, message: '虚拟机不存在' })
       }
     }
     
     if (!vmExists) {
-      console.log('[VNC] VM not found at all')
       return res.json({ code: 404, message: '虚拟机不存在' })
     }
     
-    // Get VNC spiceproxy ticket
-    console.log('[VNC] Getting VNC ticket for', endpoint, vmid)
+    // LXC containers don't support VNC - use console instead
+    if (endpoint === 'lxc') {
+      return res.json({
+        code: 200,
+        message: 'LXC容器不支持VNC，请使用SSH终端',
+        data: { type: 'lxc', note: '请使用SSH终端连接' }
+      })
+    }
+    
+    // Get VNC spiceproxy ticket for QEMU
     const data = await pve.request('POST', '/nodes/' + node.name + '/' + endpoint + '/' + vmid + '/status/vncproxy', {
       username: 'root@pam',
       faildown: 'telnet'
