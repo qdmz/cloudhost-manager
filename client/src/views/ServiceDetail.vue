@@ -206,74 +206,14 @@
         <a-button @click="showRenewModal = false">取消</a-button>
         <a-button type="primary" @click="handleRenew">确认续费</a-button>
       </template>
+    </a-modal>
     
-    
-    <!-- SSH Connection Info Modal -->
-    <a-modal
-      v-model:open="showSshModal"
-      title="SSH/SFTP 连接信息"
-      width="600px"
-      :footer="null"
-    >
-      <div v-if="sshConnectionInfo">
-        <a-alert type="info" show-icon style="margin-bottom:16px">
-          <template #message>SSH 连接信息</template>
-          <template #description>
-            请使用以下信息通过 SSH 客户端（如 PuTTY、Xshell、MobileSSHD 等）连接您的虚拟机
-          </template>
-        </a-alert>
-        
-        <a-descriptions :column="1" bordered size="small" style="margin-bottom:16px">
-          <a-descriptions-item label="主机地址">
-            <a :copyable="{ text: sshConnectionInfo.host }">{{ sshConnectionInfo.host }}</a>
-          </a-descriptions-item>
-          <a-descriptions-item label="SSH 端口">
-            {{ sshConnectionInfo.port }}
-          </a-descriptions-item>
-          <a-descriptions-item label="用户名">
-            {{ sshConnectionInfo.user }}
-          </a-descriptions-item>
-          <a-descriptions-item v-if="sshConnectionInfo.password" label="密码">
-            <a :copyable="{ text: sshConnectionInfo.password }">{{ sshConnectionInfo.password }}</a>
-          </a-descriptions-item>
-          <a-descriptions-item v-else label="密码">
-            <a-tag color="default">节点默认密码</a-tag>
-          </a-descriptions-item>
-        </a-descriptions>
-        
-        <a-divider />
-        
-        <div style="margin-bottom:8px"><strong>快捷连接命令:</strong></div>
-        <div style="background:#1e1e1e;padding:12px;border-radius:6px;margin-bottom:16px">
-          <code style="color:#4ec9b0;font-size:14px">{{ sshConnectionInfo.command }}</code>
-        </div>
-        
-        <a-button type="primary" block @click="copyToClipboard(sshConnectionInfo.command, 'SSH 命令')">
-          <CopyOutlined /> 复制连接命令
-        </a-button>
-        
-        <a-divider />
-        
-        <div style="margin-bottom:8px"><strong>SFTP 连接:</strong></div>
-        <div style="background:#1e1e1e;padding:12px;border-radius:6px;margin-bottom:16px">
-          <code style="color:#4ec9b0;font-size:14px">{{ sshConnectionInfo.sftpCmd }}</code>
-        </div>
-        <a-button block @click="copyToClipboard(sshConnectionInfo.sftpCmd, 'SFTP 命令')">
-          <CopyOutlined /> 复制 SFTP 命令
-        </a-button>
-        
-        <a-divider />
-        
-        <div>
-          <a href="https://www.putty.org/" target="_blank" style="margin-right:16px">
-            <DownloadOutlined /> 下载 PuTTY (Windows)
-          </a>
-          <a href="https://apps.apple.com/app/xshell/id943624443" target="_blank">
-            <MobileOutlined /> 下载 Xshell (iOS/Android)
-          </a>
-        </div>
-      </div>
-    </a-modal></a-modal>
+    <!-- SSH Terminal Component -->
+    <SshTerminal
+      v-model:visible="showSshModal"
+      :ssh-info="sshConnectionInfo"
+      @close="sshConnectionInfo = null"
+    />
   </div>
 </template>
 
@@ -282,6 +222,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
 import { getService, startService, stopService, restartService, resetPassword, reinstallSystem, renewService, getServiceStats } from '@/api/service'
+import SshTerminal from '@/components/SshTerminal.vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import {

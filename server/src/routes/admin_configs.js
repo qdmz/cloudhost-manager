@@ -1,11 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { Config } = require('../models');
-const bcrypt = require('bcryptjs');
 const { sendTemplateEmail, getSiteUrl, getConfigs, initTransporter } = require('../services/email');
 const nodemailer = require('nodemailer');
 
-// Get all configs
 router.get('/', async (req, res) => {
   try {
     const configs = await Config.findAll();
@@ -15,7 +13,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Update a config
 router.put('/:key', async (req, res) => {
   try {
     const { key } = req.params;
@@ -30,7 +27,6 @@ router.put('/:key', async (req, res) => {
       await config.save();
     }
     
-    // Reinit transporter if SMTP config changed
     if (key.startsWith('smtp_') || key === 'smtp_from') {
       await initTransporter();
     }
@@ -41,18 +37,15 @@ router.put('/:key', async (req, res) => {
   }
 });
 
-// Test SMTP connection
 router.post('/test-smtp', async (req, res) => {
   try {
     const { smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure } = req.body;
-    
     const transport = nodemailer.createTransport({
       host: smtp_host,
       port: parseInt(smtp_port) || 465,
       secure: smtp_secure === 'true' || smtp_secure === true,
       auth: { user: smtp_user, pass: smtp_pass }
     });
-    
     await transport.verify();
     res.json({ code: 200, message: 'SMTP 连接成功' });
   } catch (error) {
@@ -60,27 +53,18 @@ router.post('/test-smtp', async (req, res) => {
   }
 });
 
-// Test email send
 router.post('/test-email', async (req, res) => {
   try {
     const { to } = req.body;
-    if (!to) {
-      return res.json({ code: 400, message: '请输入测试邮箱' });
-    }
+    if (!to) return res.json({ code: 400, message: '请输入测试邮箱' });
     
     const siteUrl = await getSiteUrl();
     const result = await sendTemplateEmail(to, 'password_reset', {
-      username: '测试用户',
-      new_password: 'Test@123',
-      site_name: 'CloudHost',
-      site_url: siteUrl
+      username: '测试用户', new_password: 'Test@123',
+      site_name: 'CloudHost', site_url: siteUrl
     });
     
-    if (result) {
-      res.json({ code: 200, message: '测试邮件已发送，请检查收件箱' });
-    } else {
-      res.json({ code: 500, message: '邮件发送失败' });
-    }
+    res.json(result ? { code: 200, message: '测试邮件已发送' } : { code: 500, message: '邮件发送失败' });
   } catch (error) {
     res.json({ code: 500, message: '邮件发送失败: ' + error.message });
   }

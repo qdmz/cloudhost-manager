@@ -141,4 +141,21 @@ router.post('/:id/close', auth, async (req, res) => {
   }
 })
 
+
+// Get ticket categories
+router.get('/categories', auth, async (req, res) => {
+  try {
+    const categories = [
+      { id: 'technical', name: '技术支持', color: 'blue' },
+      { id: 'billing', name: '账单问题', color: 'orange' },
+      { id: 'sales', name: '售前咨询', color: 'green' },
+      { id: 'complaint', name: '投诉建议', color: 'red' },
+      { id: 'other', name: '其他', color: 'default' }
+    ]
+    res.json({ code: 200, data: categories })
+  } catch (error) {
+    res.json({ code: 500, message: error.message })
+  }
+})
+
 module.exports = router

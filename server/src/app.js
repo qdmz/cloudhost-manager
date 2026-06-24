@@ -51,6 +51,7 @@ app.use('/api/pay', require('./routes/pay'))
 app.use('/api/domain-bindings', require('./routes/domain_bindings'))
 app.use('/api/port-forwards', require('./routes/port_forwards'))
 app.use('/api/console', require('./routes/console'))
+app.use('/api/backup', require('./routes/admin_backups'))
 
 app.get('/api/health', (req, res) => {
   res.json({ code: 200, message: 'OK' })

@@ -7,23 +7,21 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src")
-    },
-    dedupe: ["vue", "vue-router", "pinia", "ant-design-vue"]
+    }
   },
   base: "/",
   build: {
     rollupOptions: {
       output: {
-        chunkFileNames: 'assets/[name]-[hash].js',
-        entryFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash].[ext]'
+        // 彻底禁用 code splitting，所有代码打包到一个文件
+        inlineDynamicImports: true
       }
     },
     cssCodeSplit: false,
     commonjsOptions: {
       transformMixedEsModules: true
     },
-    chunkSizeWarningLimit: 1000
+    chunkSizeWarningLimit: 5000
   },
   server: {
     port: 3000,

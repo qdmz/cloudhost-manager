@@ -67,7 +67,7 @@ router.get('/', auth, async (req, res) => {
       include: [
         { model: Product, as: 'product', attributes: ['name', 'type'] },
         { model: Plan, as: 'plan', attributes: ['name', 'cpu', 'memory', 'disk', 'bandwidth', 'traffic', 'price_monthly'] },
-        { model: Node, as: 'node', attributes: ['name', 'ip'] }
+        { model: Node, as: 'node', attributes: ['name', 'server_ip'] }
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(page_size),
@@ -253,6 +253,55 @@ router.get('/:id/query', auth, async (req, res) => {
   } catch (error) {
     console.error('[Orders] Query error:', error)
     res.json({ code: 500, message: '查询失败' })
+  }
+})
+
+
+// Use voucher
+router.post('/use-voucher', auth, async (req, res) => {
+  try {
+    const { voucher_code } = req.body
+    if (!voucher_code) {
+      return res.json({ code: 400, message: '请输入兑换码' })
+    }
+    
+    const { Voucher, User, BalanceLog } = require('../models')
+    const voucher = await Voucher.findOne({ 
+      where: { code: voucher_code, is_used: false } 
+    })
+    
+    if (!voucher) {
+      return res.json({ code: 404, message: '兑换码无效或已使用' })
+    }
+    
+    if (voucher.expired_at && new Date(voucher.expired_at) < new Date()) {
+      return res.json({ code: 400, message: '兑换码已过期' })
+    }
+    
+    voucher.is_used = true
+    voucher.used_by = req.userId
+    voucher.used_at = new Date()
+    await voucher.save()
+    
+    const user = await User.findByPk(req.userId)
+    const newBalance = (parseFloat(user.balance) || 0) + parseFloat(voucher.amount)
+    await user.update({ balance: newBalance })
+    
+    await BalanceLog.create({
+      user_id: req.userId,
+      type: 'topup',
+      amount: voucher.amount,
+      balance_before: user.balance,
+      balance_after: newBalance,
+      note: '兑换码充值: ' + voucher_code,
+      related_id: voucher.id,
+      related_type: 'voucher'
+    })
+    
+    res.json({ code: 200, message: '兑换成功，账户余额已增加' })
+  } catch (error) {
+    console.error('[Orders] Use voucher error:', error)
+    res.json({ code: 500, message: '兑换失败: ' + error.message })
   }
 })
 
