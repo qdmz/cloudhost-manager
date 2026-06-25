@@ -74,7 +74,7 @@
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="默认节点">
-              <a-select v-model:value="productForm.node_id" placeholder="选择默认节点">
+              <a-select v-model:value="productForm.node_id" @change="loadOsOptionsFromNode" placeholder="选择默认节点">
                 <a-select-option v-for="node in availableNodes" :key="node.id" :value="node.id">
                   {{ node.name }} ({{ node.ip }})
                 </a-select-option>

@@ -261,8 +261,9 @@ const reinstallForm = ref({ image_id: null })
 watch(() => showReinstallModal.value, async (val) => {
   if (val && service.value) {
     try {
-      const res = await axios.get('/api/services/' + service.value.id + '/images')
-      images.value = res.data?.data || []
+      const { request } = await import('@/utils/request')
+      const res = await request.get('/services/' + service.value.id + '/images')
+      images.value = res?.data || []
     } catch (e) {
       console.error('Load images error:', e)
     }
