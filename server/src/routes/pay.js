@@ -54,7 +54,7 @@ async function processPaymentSuccess(order, tradeNo, userId) {
       disk: plan.disk,
       bandwidth: plan.bandwidth,
       vmid: pveVmid,
-      password: pveVmid ? password : '',
+      password: '',
       price: parseFloat(order.amount) / (order.quantity || 1),
       expire_time: expireAt
     })

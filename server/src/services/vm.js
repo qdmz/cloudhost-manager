@@ -87,7 +87,7 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    await client.startVM(service.vmid)
+    await client.startVM(service.vmid, service.type)
     
     await service.update({ status: 'running' })
   }
@@ -97,7 +97,7 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    await client.stopVM(service.vmid)
+    await client.stopVM(service.vmid, service.type)
     
     await service.update({ status: 'stopped' })
   }
@@ -107,7 +107,7 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    await client.restartVM(service.vmid)
+    await client.restartVM(service.vmid, service.type)
   }
   
   async resetPassword(service, password) {
@@ -115,7 +115,7 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    await client.resetPassword(service.vmid, password)
+    await client.resetPassword(service.vmid, password, service.type)
   }
   
   async reinstall(service, imageId) {
@@ -126,7 +126,7 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    await client.reinstallVM(service.vmid, image.template)
+    await client.reinstallVM(service.vmid, image.template, service.type)
     
     await service.update({ os: image.name })
   }
@@ -136,7 +136,7 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    if (!service.vmid) return { cpu: 0, memory: 0, disk: 0, network_usage: N/A }
+    if (!service.vmid) return { cpu: 0, memory: 0, disk: 0, network_usage: 'N/A' }
     return await client.getVMStats(service.vmid, service.type)
   }
   
@@ -370,7 +370,7 @@ class VMService {
     const client = await this.getClient(node)
     
     // 生成下一个可用VMID
-    const nextVmid = await client.getNextVmid()
+    const nextVmid = await this.getNextVmid(node)
     
     // Merge auto-assigned values into options
     const resolvedOptions = {
@@ -390,9 +390,9 @@ class VMService {
   }
 
   // 获取下一个可用的VMID
-  async getNextVmid() {
-    // 从100开始分配，保留1-99给系统
-    return 100
+  async getNextVmid(node) {
+    const client = await this.getClient(node)
+    return await client.getNextVmid()
   }
 
   // 创建LXC容器
@@ -833,26 +833,39 @@ class PVEClient {
     }
   }
   
-  async startVM(vmid) {
-    return await this.request('POST', `/nodes/${this.nodeName}/qemu/${vmid}/status/start`)
+  async startVM(vmid, type) {
+    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
+    return await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/start`)
   }
   
-  async stopVM(vmid) {
-    return await this.request('POST', `/nodes/${this.nodeName}/qemu/${vmid}/status/stop`)
+  async stopVM(vmid, type) {
+    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
+    return await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/stop`)
   }
   
-  async restartVM(vmid) {
-    return await this.request('POST', `/nodes/${this.nodeName}/qemu/${vmid}/status/reboot`)
+  async restartVM(vmid, type) {
+    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
+    return await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/reboot`)
   }
   
-  async resetPassword(vmid, password) {
-    return await this.request('PUT', `/nodes/${this.nodeName}/qemu/${vmid}/config`, {
+  async resetPassword(vmid, password, type) {
+    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
+    if (type === 'lxc') {
+      return await this.request('PUT', `/nodes/${this.nodeName}/${endpoint}/${vmid}/config`, {
+        'unprivileged': 1
+      })
+    }
+    return await this.request('PUT', `/nodes/${this.nodeName}/${endpoint}/${vmid}/config`, {
       'cipassword': password
     })
   }
   
-  async reinstallVM(vmid, template) {
-    return await this.request('POST', `/nodes/${this.nodeName}/qemu/${vmid}/status/stop`)
+  async reinstallVM(vmid, template, type) {
+    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
+    // Stop the VM first
+    await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/stop`)
+    // Then reboot (KVM) or recreate (LXC)
+    return await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/reboot`)
   }
   
   async getVMStats(vmid, type) {
@@ -1181,16 +1194,17 @@ class PVEClient {
       }
 
       console.log('[LXC Create] Params:', JSON.stringify(params, null, 2));
-      // Use JSON body for LXC (PVE needs JSON for net0, features)
+      // PVE vzcreate API requires form-encoded body
       await this._ensureTicket();
       const headers = {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': `PVEAuthCookie=${this.ticket}`,
         'CSRFPreventionToken': this.csrfToken,
       };
+      const formData = Object.entries(params).map(([k,v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
       const response = await axios.post(
         `${this.host}/api2/json/nodes/${this.nodeName}/lxc`,
-        params,
+        formData,
         { headers, timeout: 30000 },
       );
       const taskId = response.data.data;
