@@ -112,7 +112,12 @@ const editForm = ref({
   cpu: 1,
   memory: 1024,
   disk: 20,
-  status: 'running'
+  status: 'running',
+  ipv4: '',
+  ipv6: '',
+  ssh_port: null,
+  vnc_port: null,
+  mac: ''
 })
 
 // 转移相关
@@ -183,7 +188,12 @@ const openEditModal = (record) => {
     cpu: record.cpu || 1,
     memory: record.memory || 1024,
     disk: record.disk || 20,
-    status: record.status || 'running'
+    status: record.status || 'running',
+    ipv4: record.ipv4 || '',
+    ipv6: record.ipv6 || '',
+    ssh_port: record.ssh_port || null,
+    vnc_port: record.vnc_port || null,
+    mac: record.mac || ''
   }
   showEditModal.value = true
 }
