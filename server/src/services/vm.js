@@ -32,6 +32,31 @@ async function getAvailableTemplates(node) {
   });
 }
 
+// SSH 执行辅助函数（使用 ssh2 库，避免 shell 特殊字符问题）
+async function execSSH(host, port, username, password, command) {
+  const { Client } = require('ssh2')
+  return new Promise((resolve, reject) => {
+    const conn = new Client()
+    conn.on('ready', () => {
+      conn.exec(command, (err, stream) => {
+        if (err) return reject(err)
+        let stdout = ''
+        let stderr = ''
+        stream.on('close', (code) => {
+          conn.end()
+          if (code !== 0) return reject(new Error(`SSH exit code ${code}: ${stderr}`))
+          resolve(stdout.trim())
+        }).on('data', (data) => { stdout += data }).on('error', (err) => {
+          conn.end()
+          reject(err)
+        })
+      })
+    }).on('error', (err) => reject(err)).connect({
+      host, port: parseInt(port) || 22, username, password, readyTimeout: 10000
+    })
+  })
+}
+
 // 获取 PVE 节点的资源限制
 async function getNodeResources(node) {
   return new Promise((resolve) => {
@@ -713,6 +738,7 @@ class PVEClient {
     this.sshUser = node.ssh_username || "root"
     this.sshHost = node.ssh_host || node.host.replace(/^https?:\/\//, "").replace(/:\d+$/, "")
     this.sshPort = node.ssh_port || 22
+    this.sshPassword = node.ssh_password || ''
   }
   
   async request(method, path, params = null) {
@@ -1047,15 +1073,19 @@ class PVEClient {
       
       // Fallback: Try SSH
       console.log('[Sync] PVE API unavailable, trying SSH for LXC images...')
-      const { execSync } = require('child_process')
       const sshUser = this.sshUser || 'root'
       const sshHost = this.sshHost || this.host.replace(/^https?:\/\//, '').replace(/:\d+$/, '')
       const sshPort = this.sshPort || 22
+      const sshPass = this.sshPassword || ''
       
-      const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p ${sshPort} ${sshUser}@${sshHost} "pveam list local 2>/dev/null || ls -1 /var/lib/vz/template/cache/*.tar.* 2>/dev/null || echo no_images"`
-      const output = execSync(cmd, { encoding: 'utf8', timeout: 15000 })
+      const cmd = `ls -1 /var/lib/vz/template/cache/*.tar.* 2>/dev/null || echo no_images`
+      let output = ''
+      if (sshPass) {
+        try { output = await execSSH(sshHost, sshPort, sshUser, sshPass, cmd) }
+        catch(e) { console.error('[Sync] SSH LXC fallback failed:', e.message) }
+      }
       
-      if (output.includes('no_images') || output.trim() === '') return []
+      if (!output || output.includes('no_images') || output.trim() === '') return []
       
       const lines = output.trim().split('\n').filter(l => l.includes(':') || l.endsWith('.tar.gz') || l.endsWith('.tar.xz') || l.endsWith('.tar.zst'))
       for (const line of lines) {
@@ -1090,6 +1120,7 @@ class PVEClient {
       for (const storage of storages || []) {
         const storageName = storage.storage || storage.name
         try {
+          // 1. Get ISO files via API
           const data = await this.request('GET', `/nodes/${this.nodeName}/storage/${storageName}/content`, {
             content: 'iso'
           })
@@ -1097,10 +1128,11 @@ class PVEClient {
           for (const item of data || []) {
             if (item.content === 'iso') {
               const filename = item.volid.split('/').pop()
+              const [os, version] = this.parseOsFromTemplate(filename)
               images.push({
                 name: filename,
-                os: 'ISO',
-                version: filename,
+                os: os === 'Other' ? 'ISO' : os,
+                version: version,
                 arch: 'amd64',
                 template: item.volid,
                 storage: storageName
@@ -1112,17 +1144,57 @@ class PVEClient {
         }
       }
       
+      // 2. Use SSH to scan template directories for .qcow2 files (PVE API doesn't list them as 'iso' content)
+      try {
+        const sshUser = this.sshUser || 'root'
+        const sshHost = this.sshHost || this.host.replace(/^https?:\/\//, '').replace(/:\d+$/, '')
+        const sshPort = this.sshPort || 22
+        const sshPass = this.sshPassword || ''
+        
+        const cmd = 'ls -1 /var/lib/vz/template/iso/*.qcow2 2>/dev/null; ls -1 /var/lib/vz/template/import/*.qcow2 2>/dev/null || true'
+        let output = ''
+        if (sshPass) {
+          try { output = await execSSH(sshHost, sshPort, sshUser, sshPass, cmd) }
+          catch(e) { console.error('[Sync] SSH qcow2 scan failed:', e.message) }
+        }
+        
+        if (output && output.includes('.qcow2')) {
+          const existingTemplates = new Set(images.map(img => img.template))
+          for (const filepath of output.split('\n')) {
+            const filename = filepath.split('/').pop()
+            if (!existingTemplates.has('local:iso/' + filename)) {
+              const [os, version] = this.parseOsFromTemplate(filename)
+              images.push({
+                name: filename,
+                os: os,
+                version: version,
+                arch: 'amd64',
+                template: 'local:iso/' + filename,
+                storage: 'local',
+                type: 'qcow2'
+              })
+            }
+          }
+        }
+      } catch (err) {
+        // SSH fallback failed, ignore
+      }
+      
       if (images.length > 0) return images
       
       // Fallback: Try SSH
       console.log('[Sync] PVE API unavailable, trying SSH for ISO images...')
-      const { execSync } = require('child_process')
       const sshUser = this.sshUser || 'root'
       const sshHost = this.sshHost || this.host.replace(/^https?:\/\//, '').replace(/:\d+$/, '')
       const sshPort = this.sshPort || 22
+      const sshPass = this.sshPassword || ''
       
-      const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p ${sshPort} ${sshUser}@${sshHost} "pveam list local:iso 2>/dev/null || ls -1 /var/lib/vz/import/*.iso 2>/dev/null || echo no_images"`
-      const output = execSync(cmd, { encoding: 'utf8', timeout: 15000 })
+      const cmd = 'pveam list local:iso 2>/dev/null || ls -1 /var/lib/vz/import/*.iso 2>/dev/null || echo no_images'
+      let output = ''
+      if (sshPass) {
+        try { output = await execSSH(sshHost, sshPort, sshUser, sshPass, cmd) }
+        catch(e) { console.error('[Sync] SSH ISO fallback failed:', e.message) }
+      }
       
       if (output.includes('no_images') || output.trim() === '') return []
       
@@ -1471,26 +1543,42 @@ class PVEClient {
 
   parseOsFromTemplate(templatePath) {
     const filename = templatePath.split('/').pop()
-    const name = filename.replace('.tar.gz', '').replace('.raw', '').replace('.qcow2', '')
-    
-    const osMap = {
-      'ubuntu': 'Ubuntu',
-      'debian': 'Debian',
-      'centos': 'CentOS',
-      'fedora': 'Fedora',
-      'alpine': 'Alpine',
-      'arch': 'Arch Linux',
-      'opensuse': 'openSUSE',
-      'gentoo': 'Gentoo'
+    // Strip common extensions
+    let name = filename
+    for (const ext of ['.tar.zst', '.tar.xz', '.tar.gz', '.raw', '.qcow2', '.iso']) {
+      if (name.toLowerCase().endsWith(ext)) {
+        name = name.slice(0, -ext.length)
+        break
+      }
     }
+    
+    const osMap = [
+      { pattern: 'alpine', os: 'Alpine' },
+      { pattern: 'ubuntu', os: 'Ubuntu' },
+      { pattern: 'debian', os: 'Debian' },
+      { pattern: 'centos', os: 'CentOS' },
+      { pattern: 'fedora', os: 'Fedora' },
+      { pattern: 'arch', os: 'Arch Linux' },
+      { pattern: 'opensuse', os: 'openSUSE' },
+      { pattern: 'gentoo', os: 'Gentoo' },
+      { pattern: 'rocky', os: 'Rocky Linux' },
+      { pattern: 'almalinux', os: 'AlmaLinux' },
+    ]
     
     let os = 'Other'
     let version = name
     
-    for (const [key, value] of Object.entries(osMap)) {
-      if (name.toLowerCase().includes(key)) {
-        os = value
-        version = name.replace(new RegExp(key, 'gi'), '').replace(/[-_]/g, '').trim() || version
+    for (const { pattern, os: osName } of osMap) {
+      const idx = name.toLowerCase().indexOf(pattern.toLowerCase())
+      if (idx !== -1) {
+        os = osName
+        // Remove the os keyword and surrounding separators
+        version = name.substring(0, idx) + name.substring(idx + pattern.length)
+        // Clean up leading/trailing separators and whitespace
+        version = version.replace(/^[-_.\s]+/, '').replace(/[-_.\s]+$/, '')
+        // Collapse repeated separators
+        version = version.replace(/[-_.]{2,}/g, '-').replace(/\s+/g, ' ').trim()
+        if (!version) version = name
         break
       }
     }
