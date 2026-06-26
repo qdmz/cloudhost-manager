@@ -375,8 +375,15 @@ class VMService {
     let osTemplate = options.template || options.os_template
     if (!osTemplate) {
       if (options.productId) {
-        const product = await Product.findByPk(options.productId)
-        if (product?.default_os) {
+        const product = await Product.findByPk(options.productId, {
+          include: [{ model: Image, as: 'image' }]
+        })
+        if (product?.image_id) {
+          const image = product?.image
+          if (image?.template) {
+            osTemplate = image.template
+          }
+        } else if (product?.default_os) {
           // Convert OS name to PVE template name
           const osMapping = {
             'ubuntu-22.04': 'ubuntu-22.04-default',

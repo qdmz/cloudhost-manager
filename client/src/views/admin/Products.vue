@@ -96,6 +96,13 @@
             <a-select-option v-for="os in osOptions" :key="os.value" :value="os.value">{{ os.label }}</a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item label="默认镜像模板">
+          <a-select v-model:value="productForm.image_id" placeholder="选择默认镜像（优先级高于操作系统）" allowClear>
+            <a-select-option v-for="img in filteredImages" :key="img.id" :value="img.id">
+              {{ img.name }} ({{ img.os }} - {{ img.type }})
+            </a-select-option>
+          </a-select>
+        </a-form-item>
       </a-form>
     </a-modal>
     
@@ -204,27 +211,38 @@ const productForm = reactive({
   status: 'online',
   node_id: null,
   default_type: 'kvm',
-  default_os: 'ubuntu-22.04'
+  default_os: 'ubuntu-22.04',
+  image_id: null
 })
 
 const availableNodes = ref([])
 const osOptions = ref([])
+const allImages = ref([])
+
+const filteredImages = computed(() => {
+  if (!productForm.value.node_id) return allImages.value
+  return allImages.value.filter(img => img.node_id === productForm.value.node_id)
+})
 
 const loadOsOptionsFromNode = async (nodeId) => {
   if (!nodeId) {
     osOptions.value = []
+    allImages.value = []
     return
   }
   try {
     const { getImages } = await import('@/api/admin')
     const res = await getImages({ node_id: nodeId })
-    osOptions.value = (res.data?.list || res.data || []).map(img => ({
+    const images = res.data?.list || res.data || []
+    osOptions.value = images.map(img => ({
       label: img.name,
       value: img.template
     }))
+    allImages.value = images
   } catch (e) {
     console.error('Failed to load OS options:', e)
     osOptions.value = []
+    allImages.value = []
   }
 }
 
@@ -290,7 +308,8 @@ const openAddModal = () => {
     cpu_range: '1-8',
     memory_range: '512-16384',
     disk_range: '10-500',
-    status: 'online'
+    status: 'online',
+    image_id: null
   })
   addModalVisible.value = true
 }
@@ -308,10 +327,15 @@ const openEditModal = (product) => {
     status: product.status || 'online',
     node_id: product.node_id || null,
     default_type: product.default_type || 'kvm',
-    default_os: product.default_os || 'ubuntu-22.04'
+    default_os: product.default_os || 'ubuntu-22.04',
+    image_id: product.image_id || null
   })
   // Fetch available nodes when editing
   fetchAvailableNodes()
+  // Load images for selected node
+  if (product.node_id) {
+    loadOsOptionsFromNode(product.node_id)
+  }
   addModalVisible.value = true
 }
 

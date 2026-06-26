@@ -1106,7 +1106,20 @@ router.put("/configs/update-single", auth, admin, async (req, res) => {
     const hasSmtpChange = smtpKeys.includes(key)
     if (hasSmtpChange) {
       const emailService = require("../services/email")
-      await emailService.initTransporter()
+      // Reload SMTP config from DB
+      const configs = await Config.findAll({ where: { key: { [require('sequelize').Op.in]: smtpKeys } } })
+      const cfg = {}
+      for (const c of configs) {
+        if (c.key === 'smtp_port') cfg.port = parseInt(c.value) || 465
+        else if (c.key === 'smtp_secure') cfg.secure = c.value === 'true'
+        else if (c.key === 'smtp_user') cfg.user = c.value
+        else if (c.key === 'smtp_pass') cfg.pass = c.value
+        else if (c.key === 'smtp_host') cfg.host = c.value
+        else if (c.key === 'smtp_from') cfg.from = c.value
+      }
+      if (cfg.host) {
+        await emailService.initTransporter(cfg)
+      }
     }
     res.json({ code: 200, message: "保存成功" })
   } catch (error) {
@@ -1118,26 +1131,35 @@ router.put("/configs/update-single", auth, admin, async (req, res) => {
 // 测试邮件发送
 router.post("/configs/test-template-email", auth, admin, async (req, res) => {
   try {
-    const { to, template_name, variables } = req.body
+    const { to, template, template_name, variables } = req.body
     if (!to) {
       return res.json({ code: 400, message: "请提供收件人邮箱" })
     }
-    if (!template_name) {
+    const tplName = template_name || template
+    if (!tplName) {
       return res.json({ code: 400, message: "请提供模板名称" })
     }
     const emailService = require("../services/email")
-    await emailService.initTransporter()
-    
-    if (!emailService.templates[template_name]) {
-      return res.json({ code: 400, message: "模板不存在" })
+    // Load SMTP config from DB
+    const configs = await Config.findAll({ where: { key: { [require('sequelize').Op.in]: ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure'] } } })
+    const cfg = {}
+    for (const c of configs) {
+      if (c.key === 'smtp_port') cfg.port = parseInt(c.value) || 465
+      else if (c.key === 'smtp_secure') cfg.secure = c.value === 'true'
+      else if (c.key === 'smtp_user') cfg.user = c.value
+      else if (c.key === 'smtp_pass') cfg.pass = c.value
+      else if (c.key === 'smtp_host') cfg.host = c.value
+    }
+    if (cfg.host) {
+      await emailService.initTransporter(cfg)
     }
     
-    const result = await emailService.sendTemplate(to, template_name, { site_name: "CloudHost", ...variables })
-    if (result) {
-      res.json({ code: 200, message: "模板邮件发送成功" })
-    } else {
-      res.json({ code: 500, message: "模板邮件发送失败" })
+    if (!emailService.templates[tplName]) {
+      return res.json({ code: 400, message: "模板不存在: " + tplName })
     }
+    
+    const result = await emailService.sendTemplate(to, tplName, { site_name: "CloudHost", ...(variables || {}) })
+    res.json({ code: 200, message: "模板邮件发送成功" })
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: "发送失败: " + error.message })
@@ -1169,14 +1191,22 @@ router.post("/configs/test-email", auth, admin, async (req, res) => {
       return res.json({ code: 400, message: "请提供收件人邮箱" })
     }
     const emailService = require("../services/email")
-    await emailService.initTransporter()
+    // Load SMTP config from DB
+    const configs = await Config.findAll({ where: { key: { [require('sequelize').Op.in]: ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure'] } } })
+    const cfg = {}
+    for (const c of configs) {
+      if (c.key === 'smtp_port') cfg.port = parseInt(c.value) || 465
+      else if (c.key === 'smtp_secure') cfg.secure = c.value === 'true'
+      else if (c.key === 'smtp_user') cfg.user = c.value
+      else if (c.key === 'smtp_pass') cfg.pass = c.value
+      else if (c.key === 'smtp_host') cfg.host = c.value
+    }
+    if (cfg.host) {
+      await emailService.initTransporter(cfg)
+    }
     const html = `<h1>测试邮件</h1><p>如果您看到这封邮件，说明邮件服务配置正确。</p>`
     const result = await emailService.send(to, "CloudHost 测试邮件", html)
-    if (result) {
-      res.json({ code: 200, message: "邮件发送成功" })
-    } else {
-      res.json({ code: 500, message: "邮件发送失败" })
-    }
+    res.json({ code: 200, message: "邮件发送成功" })
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: "发送失败: " + error.message })

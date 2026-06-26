@@ -98,6 +98,24 @@
             <a-form-item label="IPv6子网" name="ipv6_subnet">
               <a-input v-model:value="nodeForm.ipv6_subnet" placeholder="如: 2001:db8::/64" />
             </a-form-item>
+            <a-divider style="margin: 12px 0" />
+            <a-row :gutter="16">
+              <a-col :span="8">
+                <a-form-item label="端口转发起始" name="port_range_start">
+                  <a-input-number v-model:value="nodeForm.port_range_start" :min="1024" :max="65535" style="width: 100%" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="8">
+                <a-form-item label="端口转发结束" name="port_range_end">
+                  <a-input-number v-model:value="nodeForm.port_range_end" :min="1024" :max="65535" style="width: 100%" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="8">
+                <a-form-item label="每VM最大端口数" name="max_ports_per_vm">
+                  <a-input-number v-model:value="nodeForm.max_ports_per_vm" :min="1" :max="50" style="width: 100%" />
+                </a-form-item>
+              </a-col>
+            </a-row>
           </a-form>
         </a-tab-pane>
         
@@ -240,6 +258,7 @@ const nodeForm = ref({
   id: null, name: '', type: 'pve', host: '', api_user: '', api_token: '',
   location: '', nat_bridge: 'vmbr1', ipv6_bridge: 'vmbr2',
   nat_subnet: '', ipv6_subnet: '', note: '',
+  port_range_start: 30000, port_range_end: 31000, max_ports_per_vm: 5,
   ssh_enabled: false, ssh_host: '', ssh_port: 22, ssh_username: 'root', ssh_password: '', ssh_key: ''
 })
 
@@ -281,6 +300,7 @@ const openAddModal = () => {
     id: null, name: '', type: 'pve', host: '', api_user: '', api_token: '',
     location: '', nat_bridge: 'vmbr1', ipv6_bridge: 'vmbr2',
     nat_subnet: '', ipv6_subnet: '', note: '',
+    port_range_start: 30000, port_range_end: 31000, max_ports_per_vm: 5,
     ssh_enabled: false, ssh_host: '', ssh_port: 22, ssh_username: 'root', ssh_password: '', ssh_key: ''
   }
   activeTab.value = 'basic'

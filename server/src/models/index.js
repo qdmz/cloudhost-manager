@@ -64,6 +64,7 @@ const Product = sequelize.define('Product', {
   node_id: { type: DataTypes.INTEGER, allowNull: true },
   default_type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus'), defaultValue: 'kvm' },
   default_os: { type: DataTypes.STRING(50), defaultValue: '' },
+  image_id: { type: DataTypes.INTEGER, allowNull: true },
   custom_ports: { type: DataTypes.TEXT },
   auto_renew: { type: DataTypes.BOOLEAN, defaultValue: false }
 }, { tableName: 'products', timestamps: true, underscored: true })
@@ -120,7 +121,15 @@ const Node = sequelize.define('Node', {
   ssh_port: { type: DataTypes.INTEGER, defaultValue: 22 },
   ssh_username: { type: DataTypes.STRING(100), defaultValue: 'root' },
   ssh_password: { type: DataTypes.STRING(255) },
-  ssh_key: { type: DataTypes.TEXT }
+  ssh_key: { type: DataTypes.TEXT },
+  // 端口转发范围配置
+  port_range_start: { type: DataTypes.INTEGER, defaultValue: 30000 },
+  port_range_end: { type: DataTypes.INTEGER, defaultValue: 31000 },
+  max_ports_per_vm: { type: DataTypes.INTEGER, defaultValue: 5 },
+  server_ip: { type: DataTypes.STRING(50) },
+  ipv4_range_start: { type: DataTypes.STRING(50) },
+  ipv4_range_end: { type: DataTypes.STRING(50) },
+  ipv6_prefix: { type: DataTypes.STRING(100) }
 }, { tableName: 'nodes', timestamps: true, underscored: true })
 
 const Image = sequelize.define('Image', {
@@ -248,7 +257,7 @@ const PortForward = sequelize.define('PortForward', {
 
 User.hasMany(Service, { foreignKey: 'user_id' })
 Service.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
-Service.belongsTo(Node, { foreignKey: 'node_id', as: 'node', attributes: ['id', 'name', 'host', 'api_user', 'status', 'ssh_host', 'server_ip', 'nat_bridge', 'ipv6_bridge'] })
+Service.belongsTo(Node, { foreignKey: 'node_id', as: 'node', attributes: ['id', 'name', 'host', 'api_user', 'status', 'ssh_host', 'server_ip', 'nat_bridge', 'ipv6_bridge', 'nat_subnet', 'ipv6_subnet', 'port_range_start', 'port_range_end', 'max_ports_per_vm', 'ipv4_range_start', 'ipv4_range_end', 'ipv6_prefix'] })
 Service.belongsTo(Product, { foreignKey: 'product_id', as: 'product' })
 Service.belongsTo(Plan, { foreignKey: 'plan_id', as: 'plan' })
 Service.hasMany(DomainBinding, { foreignKey: 'service_id' })
@@ -265,6 +274,8 @@ Order.belongsTo(Node, { foreignKey: 'node_id', as: 'node' })
 
 Node.hasMany(Image, { foreignKey: 'node_id' })
 Image.belongsTo(Node, { foreignKey: 'node_id' })
+
+Product.belongsTo(Image, { foreignKey: 'image_id', as: 'image' })
 
 User.hasMany(Ticket, { foreignKey: 'user_id' })
 Ticket.belongsTo(User, { foreignKey: 'user_id', as: 'user' })

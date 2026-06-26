@@ -15,15 +15,15 @@ class EmailService {
     this.loadTemplates()
   }
 
-  initTransporter() {
+  initTransporter(cfg) {
     try {
       this.transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.qq.com',
-        port: parseInt(process.env.SMTP_PORT) || 465,
-        secure: process.env.SMTP_SECURE === 'true',
+        host: (cfg && cfg.host) || process.env.SMTP_HOST || 'smtp.qq.com',
+        port: (cfg && cfg.port) ? parseInt(cfg.port) : (parseInt(process.env.SMTP_PORT) || 465),
+        secure: (cfg && cfg.secure !== undefined) ? cfg.secure : (process.env.SMTP_SECURE === 'true'),
         auth: {
-          user: process.env.SMTP_USER || '',
-          pass: process.env.SMTP_PASS || ''
+          user: (cfg && cfg.user) || process.env.SMTP_USER || '',
+          pass: (cfg && cfg.pass) || process.env.SMTP_PASS || ''
         }
       })
     } catch (error) {

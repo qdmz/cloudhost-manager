@@ -281,11 +281,8 @@ const emailTesting = ref(false)
 const fetchConfigs = async () => {
   try {
     const res = await apiGetConfigs()
-    allConfigs.value = {}
-    const list = res.data?.list || (Array.isArray(res.data) ? res.data : [])
-    for (const c of list) {
-      allConfigs.value[c.key] = c.value
-    }
+    // Backend returns { code: 200, data: { key: value, ... } } object format
+    allConfigs.value = res.data || {}
     
     // Populate site config
     siteConfig.value = {
@@ -302,13 +299,13 @@ const fetchConfigs = async () => {
       smtp_user: allConfigs.value.smtp_user || '',
       smtp_pass: allConfigs.value.smtp_pass || '',
       smtp_from: allConfigs.value.smtp_from || '',
-      smtp_secure: allConfigs.value.smtp_secure === 'true' || allConfigs.value.smtp_secure === true
+      smtp_secure: allConfigs.value.smtp_secure === true || allConfigs.value.smtp_secure === 'true'
     }
     
     // Populate system config
     systemConfig.value = {
       allow_register: allConfigs.value.allow_register !== 'false',
-      require_auth: allConfigs.value.require_auth === 'true',
+      require_auth: allConfigs.value.require_auth === true || allConfigs.value.require_auth === 'true',
       order_timeout: parseInt(allConfigs.value.order_timeout) || 15,
       default_commission: parseInt(allConfigs.value.default_commission) || 10
     }
