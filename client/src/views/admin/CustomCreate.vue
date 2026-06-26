@@ -27,7 +27,7 @@
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="选择节点" name="node_id" :rules="[{ required: true, message: '请选择节点' }]">
-              <a-select v-model:value="form.node_id" @change="loadImagesForNode" placeholder="选择节点">
+              <a-select v-model:value="form.node_id" @change="onNodeChange" placeholder="选择节点">
                 <a-select-option v-for="node in nodes" :key="node.id" :value="node.id">
                   {{ node.name }} ({{ node.type }})
                 </a-select-option>
@@ -209,12 +209,22 @@ const fetchData = async () => {
   }
 }
 
-const loadImagesForNode = async (nodeId) => {
+const onNodeChange = async (nodeId) => {
   if (!nodeId) {
     images.value = []
     form.value.image_id = null
+    form.value.ipv4 = ''
+    form.value.ipv6 = ''
     return
   }
+  // 查找节点信息
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (node) {
+    const ips = generateDefaultIPs(node)
+    form.value.ipv4 = ips.ipv4
+    form.value.ipv6 = ips.ipv6
+  }
+  // 加载该节点的镜像
   try {
     const res = await getImages({ node_id: nodeId })
     images.value = Array.isArray(res.data) ? res.data : (res.data?.list || [])
@@ -223,6 +233,28 @@ const loadImagesForNode = async (nodeId) => {
     console.error("Failed to load images:", error)
     images.value = []
   }
+}
+
+const loadImagesForNode = async (nodeId) => {
+  // 兼容旧代码
+  await onNodeChange(nodeId)
+}
+
+// 从节点配置生成默认 IP
+const generateDefaultIPs = (node) => {
+  if (!node) return { ipv4: '', ipv6: '' }
+  const natSubnet = node.nat_subnet || '172.16.1.0/24'
+  const ipv6Subnet = node.ipv6_subnet || '2001:470:1f06:15d::/64'
+  
+  // 提取 NAT 网段的最后一个 octet 起始值（默认 100）
+  const natMatch = natSubnet.match(/^(\d+\.\d+\.\d+)\.0\/\d+/)
+  const baseIPv4 = natMatch ? `${natMatch[1]}.100` : ''
+  
+  // 提取 IPv6 的 /64 前缀
+  const ipv6Match = ipv6Subnet.match(/^(.+):\d+::\/64/)
+  const baseIPv6 = ipv6Match ? `${ipv6Match[1]}::100` : ''
+  
+  return { ipv4: baseIPv4, ipv6: baseIPv6 }
 }
 
 const handleCreate = async () => {
@@ -241,8 +273,12 @@ const handleCreate = async () => {
       ...form.value,
       expire_time: form.value.expire_time.format('YYYY-MM-DD HH:mm:ss')
     }
-    await customCreateService(data)
+    const res = await customCreateService(data)
     message.success('开通成功')
+    // 如果成功，记录分配的 IP
+    if (res.data) {
+      console.log('服务创建成功，数据:', res.data)
+    }
   } catch (error) {
     message.error(error.message)
   } finally {

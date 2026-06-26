@@ -191,7 +191,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
-import { getConfigs as apiGetConfigs, updateConfigSingle, testSmtp, testEmail as testEmailApi } from '@/api/admin'
+import { getConfigs as apiGetConfigs, updateConfigSingle as apiUpdateConfigSingle, testSmtp, testEmail as testEmailApi } from '@/api/admin'
 import { request } from '@/utils/request'
 
 const activeTab = ref('site')
@@ -200,6 +200,12 @@ const siteConfig = ref({ site_name: '', site_url: '', phone: '', qq: '' })
 const emailConfig = ref({ 
   smtp_host: '', smtp_port: 465, smtp_user: '', smtp_pass: '', 
   smtp_from: '', smtp_secure: false 
+})
+const systemConfig = ref({
+  allow_register: true,
+  require_auth: false,
+  order_timeout: 15,
+  default_commission: 10
 })
 
 // Email templates
@@ -265,7 +271,7 @@ const handleTestTemplate = async (key) => {
   }
   try {
     await request.post('/admin/configs/test-template-email', {
-      template: key,
+      template_name: key,
       to: to
     })
     message.success('测试邮件已发送到 ' + to)

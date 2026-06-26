@@ -340,8 +340,26 @@ const handleAddNode = async () => {
 
 const handleEditNode = (node) => {
   nodeForm.value = { 
-    ...node,
-    ssh_password: '', // 不显示原密码
+    id: node.id,
+    name: node.name || '',
+    type: node.type || 'pve',
+    host: node.host || '',
+    api_user: node.api_user || '',
+    api_token: '',
+    location: node.location || '',
+    nat_bridge: node.nat_bridge || 'vmbr1',
+    ipv6_bridge: node.ipv6_bridge || 'vmbr2',
+    nat_subnet: node.nat_subnet || '',
+    ipv6_subnet: node.ipv6_subnet || '',
+    note: node.note || '',
+    port_range_start: node.port_range_start || 30000,
+    port_range_end: node.port_range_end || 31000,
+    max_ports_per_vm: node.max_ports_per_vm || 5,
+    ssh_enabled: node.ssh_enabled || false,
+    ssh_host: node.ssh_host || '',
+    ssh_port: node.ssh_port || 22,
+    ssh_username: node.ssh_username || 'root',
+    ssh_password: '',
     ssh_key: node.ssh_key || ''
   }
   activeTab.value = 'basic'
@@ -403,12 +421,21 @@ const handleTestPve = async (node) => {
 const syncImages = async (node) => {
   try {
     message.loading('正在同步镜像...', 0)
-    await apiSyncNodeImages(node.id)
-    message.success('镜像同步成功')
-  } catch (error) {
-    message.error(error.message)
-  } finally {
+    const res = await apiSyncNodeImages(node.id)
     message.destroy()
+    const count = res.data?.length || 0
+    message.success(`镜像同步成功，共 ${count} 个`)
+    // 刷新镜像列表
+    if (currentNode.value && currentNode.value.id === node.id) {
+      try {
+        const { getImages } = await import('@/api/admin')
+        const imgRes = await getImages({ node_id: node.id })
+        images.value = imgRes.data?.list || imgRes.data || []
+      } catch {}
+    }
+  } catch (error) {
+    message.destroy()
+    message.error('镜像同步失败: ' + (error.message || '未知错误'))
   }
 }
 

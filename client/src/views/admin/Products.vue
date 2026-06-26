@@ -330,13 +330,13 @@ const openEditModal = (product) => {
     default_os: product.default_os || 'ubuntu-22.04',
     image_id: product.image_id || null
   })
-  // Fetch available nodes when editing
-  fetchAvailableNodes()
-  // Load images for selected node
-  if (product.node_id) {
-    loadOsOptionsFromNode(product.node_id)
-  }
   addModalVisible.value = true
+  // 先加载节点列表，再加载镜像
+  fetchAvailableNodes().then(() => {
+    if (productForm.node_id) {
+      loadOsOptionsFromNode(productForm.node_id)
+    }
+  })
 }
 
 const openPlansModal = async (product) => {
