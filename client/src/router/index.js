@@ -199,7 +199,7 @@ const routes = [
       {
         path: 'images',
         name: 'AdminImages',
-        component: () => import('@/views/admin/Nodes.vue'),
+        component: () => import('@/views/admin/Images.vue'),
         meta: { title: '镜像管理' }
       },
       {
