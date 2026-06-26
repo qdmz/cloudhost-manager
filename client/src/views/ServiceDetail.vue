@@ -165,11 +165,12 @@
     <a-modal v-model:open="showReinstallModal" title="重装系统" @ok="handleReinstall">
       <a-form :model="reinstallForm">
         <a-form-item label="选择系统" name="image_id">
-          <a-select v-model:value="reinstallForm.image_id" placeholder="请选择系统镜像">
+          <a-select v-model:value="reinstallForm.image_id" placeholder="请选择系统镜像" :disabled="images.length === 0">
             <a-select-option v-for="img in images" :key="img.id" :value="img.id">
-              {{ img.name }} ({{ img.os }})
+              {{ img.name }} ({{ img.os }} - {{ img.type }})
             </a-select-option>
           </a-select>
+          <a-empty v-if="images.length === 0" description="该节点暂无可用镜像模板" />
         </a-form-item>
         <a-alert type="warning" show-icon>
           <template #message>警告</template>

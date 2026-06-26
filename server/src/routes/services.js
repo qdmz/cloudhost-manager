@@ -132,7 +132,13 @@ router.post('/:id/reinstall', auth, async (req, res) => {
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
     
-    const result = await vmService.reinstall(service, req.body.imageId)
+    // Support both imageId and image_id
+    const imageId = req.body.imageId || req.body.image_id
+    if (!imageId) {
+      return res.json({ code: 400, message: '请选择要重装的系统镜像' })
+    }
+    
+    const result = await vmService.reinstall(service, imageId)
     res.json({ code: 200, message: '系统重装中，请稍候...' })
   } catch (error) {
     console.error('[Services] Reinstall error:', error)
@@ -343,10 +349,32 @@ router.get("/:id/images", auth, async (req, res) => {
     const service = await Service.findByPk(req.params.id)
     if (!service) return res.json({ code: 404, message: "服务不存在" })
     
-    const images = await Image.findAll({
-      where: { node_id: service.node_id, status: "active" }
+    // Filter images by service type (KVM services need qcow2/iso, LXC needs container templates)
+    let whereCondition = { node_id: service.node_id, status: "active" }
+    if (service.type === 'lxc' || service.type === 'lxd' || service.type === 'incus') {
+      // LXC services can only use container templates
+      whereCondition.template = { [require('sequelize').Op.like]: '%vztmpl%' }
+    }
+    
+    const images = await Image.findAll({ where: whereCondition })
+    
+    // Add type field based on template extension
+    const imagesWithType = images.map(img => {
+      const data = img.toJSON()
+      const tpl = (data.template || '').toLowerCase()
+      if (tpl.endsWith('.tar') || tpl.endsWith('.tar.zst') || tpl.endsWith('.tar.xz') || tpl.includes('vztmpl')) {
+        data.type = 'LXC'
+      } else if (tpl.endsWith('.qcow2') || tpl.includes('import')) {
+        data.type = 'KVM(qcow2)'
+      } else if (tpl.endsWith('.iso')) {
+        data.type = 'ISO'
+      } else {
+        data.type = 'Unknown'
+      }
+      return data
     })
-    res.json({ code: 200, data: images })
+    
+    res.json({ code: 200, data: imagesWithType })
   } catch (error) {
     console.error("[Services] Images error:", error)
     res.json({ code: 500, message: "获取失败: " + error.message })
