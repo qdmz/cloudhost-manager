@@ -398,10 +398,24 @@ class VMService {
   // 创建LXC容器
   async createLXC(client, vmid, options, node) {
     try {
+      // 如果指定了源容器进行克隆
+      if (options.clone_from_vmid) {
+        const cloneResult = await client.cloneLXC(options.clone_from_vmid, vmid, {
+          hostname: options.name || `lxc-clone-${vmid}`
+        })
+        return {
+          success: true,
+          vmid: vmid,
+          message: 'LXC容器克隆成功',
+          node: node.name,
+          type: 'lxc'
+        }
+      }
+
       // Build config for PVE
       const config = {
         vmid: vmid,
-        hostname: (options.name || `CT-${vmid}`).replace(/[^\w-]/g, ),
+        hostname: (options.name || `CT-${vmid}`).replace(/[^\w-]/g, ''),
         ostype: options.os_type || 'ubuntu',
         cores: options.cpu || 1,
         memory: options.memory || 1024,
@@ -417,6 +431,7 @@ class VMService {
           // Map common template names to actual PVE template filenames
           const templateMap = {
             'debian-12': 'local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst',
+            'debian-11': 'local:vztmpl/debian_11_bullseye_x86_64_default.tar.xz',
             'ubuntu-22.04': 'local:vztmpl/ubuntu-22.04-default',
             'ubuntu-24.04': 'local:vztmpl/ubuntu-24.04-default',
           };
@@ -1277,15 +1292,29 @@ class PVEClient {
     try {
       const params = {
         newid: targetVmid,
-        name: options.name,
-        cores: options.cores,
-        memory: options.memory
+        name: options.name
       }
 
       const result = await this.request('POST', `/nodes/${this.nodeName}/qemu/${sourceVmid}/clone`, params)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: targetVmid, taskId: result.taskid }
     } catch (error) {
       console.error('Failed to clone VM:', error.message)
+      throw error
+    }
+  }
+
+  // 克隆 LXC 容器
+  async cloneLXC(sourceVmid, targetVmid, options = {}) {
+    try {
+      const params = {
+        newid: targetVmid,
+        hostname: options.hostname || `lxc-clone-${targetVmid}`
+      }
+
+      const result = await this.request('POST', `/nodes/${this.nodeName}/lxc/${sourceVmid}/clone`, params)
+      return { vmid: targetVmid, taskId: result.taskid }
+    } catch (error) {
+      console.error('Failed to clone LXC:', error.message)
       throw error
     }
   }
