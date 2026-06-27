@@ -395,8 +395,9 @@ const handleTestSsh = async () => {
 
 const handleSyncNode = async (node) => {
   try {
-    message.loading('正在同步节点...')
+    const loadingMsg = message.loading('正在同步节点...', 0)
     await apiSyncNode(node.id)
+    loadingMsg()
     message.success('节点同步成功')
     fetchNodes()
   } catch (error) {
@@ -419,10 +420,11 @@ const handleTestPve = async (node) => {
 
 const syncImages = async (node) => {
   try {
-    message.loading('正在同步镜像...')
+    const loadingMsg = message.loading('正在同步镜像...', 0)
     const res = await syncNodeImages(node.id)
-    const count = res.data?.list?.length || res.data?.length || 0
-    message.success(`镜像同步成功，共 ${count} 个`)
+    loadingMsg()
+    const count = Array.isArray(res.data) ? res.data.length : (res.data?.list?.length || 0)
+    message.success(res.message || `镜像同步成功，共 ${count} 个`)
     // 刷新镜像列表
     if (currentNode.value && currentNode.value.id === node.id) {
       try {
