@@ -12,3 +12,6 @@ export const getVNCUrl = (id) => request.get(`/services/${id}/vnc`)
 export const getServiceStats = (id) => request.get(`/services/${id}/stats`)
 export const getServiceConsole = (id) => request.get(`/services/${id}/console`)
 export const syncService = (id) => request.post(`/services/${id}/sync`)
+
+// 获取易支付支持的支付方式
+export const getPaymentMethods = () => request.get('/pay/payment-methods')

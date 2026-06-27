@@ -45,6 +45,9 @@
         <router-link to="/admin/recharges" class="menu-item" :class="{ active: $route.path === '/admin/recharges' }">
           <DollarOutlined /> 充值记录
         </router-link>
+        <router-link to="/admin/auth-requests" class="menu-item" :class="{ active: $route.path === '/admin/auth-requests' }">
+          <SafetyOutlined /> 实名认证审核
+        </router-link>
         <router-link to="/admin/backups" class="menu-item" :class="{ active: $route.path === '/admin/backups' }">
           <DatabaseOutlined /> 数据备份
         </router-link>
@@ -105,7 +108,8 @@ import {
   LinkOutlined,
   SwapOutlined,
   DollarOutlined,
-  DatabaseOutlined
+  DatabaseOutlined,
+  SafetyOutlined
 } from '@ant-design/icons-vue'
 
 const router = useRouter()

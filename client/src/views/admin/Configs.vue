@@ -184,6 +184,36 @@
           </a-form>
         </a-card>
       </a-tab-pane>
+      
+      <!-- 易支付配置 -->
+      <a-tab-pane key="epay" tab="易支付配置">
+        <a-card>
+          <a-form :model="epayConfig" layout="vertical">
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="支付接口地址">
+                  <a-input v-model:value="epayConfig.epay_url" placeholder="https://pay.example.com/submit.php" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="商户 PID">
+                  <a-input v-model:value="epayConfig.epay_pid" placeholder="您的商户 ID" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="商户密钥">
+                  <a-input-password v-model:value="epayConfig.epay_key" placeholder="您的商户密钥" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item>
+              <a-button type="primary" @click="handleSaveEpay">保存</a-button>
+            </a-form-item>
+          </a-form>
+        </a-card>
+      </a-tab-pane>
     </a-tabs>
   </div>
 </template>
@@ -206,6 +236,11 @@ const systemConfig = ref({
   require_auth: false,
   order_timeout: 15,
   default_commission: 10
+})
+const epayConfig = ref({
+  epay_url: '',
+  epay_pid: '',
+  epay_key: ''
 })
 
 // Email templates
@@ -315,6 +350,13 @@ const fetchConfigs = async () => {
       order_timeout: parseInt(allConfigs.value.order_timeout) || 15,
       default_commission: parseInt(allConfigs.value.default_commission) || 10
     }
+    
+    // Populate epay config
+    epayConfig.value = {
+      epay_url: allConfigs.value.epay_url || '',
+      epay_pid: allConfigs.value.epay_pid || '',
+      epay_key: allConfigs.value.epay_key || ''
+    }
   } catch (e) {
     message.error('获取配置失败')
   }
@@ -352,6 +394,17 @@ const handleSaveSystem = async () => {
     await apiUpdateConfigSingle('order_timeout', String(systemConfig.value.order_timeout))
     await apiUpdateConfigSingle('default_commission', String(systemConfig.value.default_commission))
     message.success('系统设置已保存')
+  } catch (e) {
+    message.error('保存失败')
+  }
+}
+
+const handleSaveEpay = async () => {
+  try {
+    await apiUpdateConfigSingle('epay_url', epayConfig.value.epay_url)
+    await apiUpdateConfigSingle('epay_pid', epayConfig.value.epay_pid)
+    await apiUpdateConfigSingle('epay_key', epayConfig.value.epay_key)
+    message.success('易支付配置已保存')
   } catch (e) {
     message.error('保存失败')
   }

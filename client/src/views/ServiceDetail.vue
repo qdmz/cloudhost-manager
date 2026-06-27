@@ -102,7 +102,7 @@
                 <SyncOutlined />
                 <span>同步状态</span>
               </div>
-              <div class="action-item" @click="showRenewModal = true">
+              <div class="action-item" @click="openRenewModal">
                 <ClockCircleOutlined />
                 <span>续费服务</span>
               </div>
@@ -136,7 +136,7 @@
           <div class="card">
             <div class="card-title">快捷操作</div>
             <a-space direction="vertical" style="width: 100%">
-              <a-button block @click="showRenewModal = true">
+              <a-button block @click="openRenewModal">
                 <DollarOutlined /> 续费服务
               </a-button>
               <a-button block @click="showResetPasswordModal = true">
@@ -193,9 +193,7 @@
         <a-form-item label="支付方式">
           <a-radio-group v-model:value="renewForm.payment_method">
             <a-radio value="balance">余额支付</a-radio>
-            <a-radio value="qqpay">QQ钱包</a-radio>
-            <a-radio value="alipay">支付宝</a-radio>
-            <a-radio value="wechat">微信支付</a-radio>
+            <a-radio v-for="m in paymentMethods" :key="m.value" :value="m.value">{{ m.name }}</a-radio>
           </a-radio-group>
         </a-form-item>
         <div class="renew-summary">
@@ -271,6 +269,22 @@ watch(() => showReinstallModal.value, async (val) => {
   }
 })
 const renewForm = ref({ cycle: 'monthly', payment_method: 'balance' })
+const paymentMethods = ref([])
+
+// 加载支付方式列表
+const loadPaymentMethods = async () => {
+  try {
+    const { getPaymentMethods } = await import('@/api/service')
+    const res = await getPaymentMethods()
+    paymentMethods.value = res.data || []
+    // 默认选中第一个非余额支付方式
+    if (paymentMethods.value.length > 0 && !renewForm.value.payment_method) {
+      renewForm.value.payment_method = paymentMethods.value[0].value
+    }
+  } catch (e) {
+    console.error('Failed to load payment methods:', e)
+  }
+}
 
 const isExpiringSoon = computed(() => {
   if (!service.value) return false
@@ -448,6 +462,12 @@ const handleRenew = async () => {
   }
   showRenewModal.value = false
   fetchService()
+}
+
+const openRenewModal = async () => {
+  await loadPaymentMethods()
+  renewForm.value = { cycle: 'monthly', payment_method: 'balance' }
+  showRenewModal.value = true
 }
 
 

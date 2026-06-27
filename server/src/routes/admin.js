@@ -83,8 +83,12 @@ router.get('/users', auth, admin, async (req, res) => {
 
 router.put('/users/:id', auth, admin, async (req, res) => {
   try {
-    const { email, phone, qq, status } = req.body
-    await User.update({ email, phone, qq, status }, { where: { id: req.params.id } })
+    const { email, phone, qq, status, password } = req.body
+    const updateData = { email, phone, qq, status }
+    if (password) {
+      updateData.password = await bcrypt.hash(password, 10)
+    }
+    await User.update(updateData, { where: { id: req.params.id } })
     res.json({ code: 200, message: '修改成功' })
   } catch (error) {
     console.error(error)
@@ -402,12 +406,21 @@ router.post('/nodes', auth, admin, async (req, res) => {
 
 router.put('/nodes/:id', auth, admin, async (req, res) => {
   try {
-    // 如果包含敏感信息，进行处理
     const updateData = { ...req.body }
     
     // 不允许直接修改密码为空
-    if (updateData.ssh_password === '') {
+    if (updateData.ssh_password === '' || updateData.ssh_password === undefined) {
       delete updateData.ssh_password
+    }
+    
+    // 不允许直接修改api_token为空
+    if (updateData.api_token === '' || updateData.api_token === undefined) {
+      delete updateData.api_token
+    }
+    
+    // 不允许直接修改ssh_key为空
+    if (updateData.ssh_key === '' || updateData.ssh_key === undefined) {
+      delete updateData.ssh_key
     }
     
     await Node.update(updateData, { where: { id: req.params.id } })
@@ -503,9 +516,15 @@ const { createAutoPortForwards } = require('../services/portForward')
 
 router.get('/images', auth, admin, async (req, res) => {
   try {
-    const { node_id } = req.query
+    const { node_id, type } = req.query
     const where = {}
     if (node_id) where.node_id = node_id
+    
+    // Filter by type: lxc only shows container templates
+    if (type === 'lxc') {
+      where.template = { [require('sequelize').Op.like]: '%vztmpl%' }
+    }
+    
     const images = await Image.findAll({ where })
     res.json({ code: 200, data: { list: images } })
   } catch (error) {
@@ -1552,6 +1571,107 @@ router.get('/backups/:name/download', auth, admin, async (req, res) => {
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: '下载失败: ' + error.message })
+  }
+})
+
+// ==================== 实名认证审核 ====================
+router.get('/auth-requests', auth, admin, async (req, res) => {
+  try {
+    const { status = 'pending' } = req.query
+    const where = {}
+    if (status !== 'all') {
+      where.status = status
+    }
+    
+    const authRequests = await AuthRequest.findAll({
+      where,
+      order: [['created_at', 'DESC']],
+      include: [{
+        model: require('../models').User,
+        as: 'user',
+        attributes: ['id', 'username', 'email', 'phone']
+      }]
+    })
+    
+    res.json({ code: 200, data: authRequests })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '获取失败: ' + error.message })
+  }
+})
+
+router.post('/auth-requests/:id/approve', auth, admin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const authRequest = await AuthRequest.findByPk(id)
+    if (!authRequest) {
+      return res.json({ code: 404, message: '申请不存在' })
+    }
+    
+    authRequest.status = 'approved'
+    authRequest.reviewed_by = req.user.id
+    authRequest.reviewed_at = new Date()
+    await authRequest.save()
+    
+    // 更新用户的认证状态
+    const user = await require('../models').User.findByPk(authRequest.user_id)
+    if (user) {
+      user.auth_status = 'approved'
+      await user.save()
+    }
+    
+    res.json({ code: 200, message: '审核通过' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '操作失败: ' + error.message })
+  }
+})
+
+router.post('/auth-requests/:id/reject', auth, admin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { reason } = req.body
+    const authRequest = await AuthRequest.findByPk(id)
+    if (!authRequest) {
+      return res.json({ code: 404, message: '申请不存在' })
+    }
+    
+    authRequest.status = 'rejected'
+    authRequest.reject_reason = reason || '审核未通过'
+    authRequest.reviewed_by = req.user.id
+    authRequest.reviewed_at = new Date()
+    await authRequest.save()
+    
+    // 更新用户的认证状态
+    const user = await require('../models').User.findByPk(authRequest.user_id)
+    if (user) {
+      user.auth_status = 'rejected'
+      await user.save()
+    }
+    
+    res.json({ code: 200, message: '已拒绝' })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '操作失败: ' + error.message })
+  }
+})
+
+// VM 转模板
+router.post('/services/:id/convert-to-template', auth, admin, async (req, res) => {
+  try {
+    const { vmService } = require('../services/vm')
+    const service = await Service.findByPk(req.params.id)
+    if (!service) return res.json({ code: 404, message: '服务不存在' })
+    
+    const node = await Node.findByPk(service.node_id)
+    if (!node) return res.json({ code: 404, message: '节点不存在' })
+    
+    const client = vmService.getClient(node)
+    const result = await client.convertToTemplate(service.vmid, service.type)
+    res.json({ code: 200, message: result.message, data: result })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: '操作失败: ' + error.message })
   }
 })
 

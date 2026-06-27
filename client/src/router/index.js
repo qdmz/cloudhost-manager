@@ -233,6 +233,12 @@ const routes = [
         meta: { title: '自定义创建' }
       },
       {
+        path: 'auth-requests',
+        name: 'AdminAuthRequests',
+        component: () => import('@/views/admin/AuthRequests.vue'),
+        meta: { title: '实名认证审核' }
+      },
+      {
         path: 'backups',
         name: 'AdminBackups',
         component: () => import('@/views/admin/Backup.vue'),

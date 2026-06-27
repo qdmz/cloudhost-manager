@@ -83,7 +83,7 @@
           </a-col>
           <a-col :span="12">
             <a-form-item label="默认虚拟化类型">
-              <a-select v-model:value="productForm.default_type" placeholder="选择虚拟化类型">
+              <a-select v-model:value="productForm.default_type" @change="onDefaultTypeChange" placeholder="选择虚拟化类型">
                 <a-select-option value="kvm">KVM</a-select-option>
                 <a-select-option value="docker">Docker</a-select-option>
                 <a-select-option value="lxc">LXC</a-select-option>
@@ -184,7 +184,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { getProducts, createProduct, updateProduct, deleteProduct, getPlans, createPlan, updatePlan, deletePlan } from '@/api/admin'
@@ -232,7 +232,12 @@ const loadOsOptionsFromNode = async (nodeId) => {
   }
   try {
     const { getImages } = await import('@/api/admin')
-    const res = await getImages({ node_id: nodeId })
+    const params = { node_id: nodeId }
+    // Filter by virtualization type
+    if (productForm.default_type === 'lxc' || productForm.default_type === 'lxd' || productForm.default_type === 'incus') {
+      params.type = 'lxc'
+    }
+    const res = await getImages(params)
     const images = res.data?.list || res.data || []
     osOptions.value = images.map(img => ({
       label: img.name,
@@ -243,6 +248,13 @@ const loadOsOptionsFromNode = async (nodeId) => {
     console.error('Failed to load OS options:', e)
     osOptions.value = []
     allImages.value = []
+  }
+}
+
+// 虚拟化类型变化时重新加载镜像
+const onDefaultTypeChange = async () => {
+  if (productForm.node_id) {
+    await loadOsOptionsFromNode(productForm.node_id)
   }
 }
 

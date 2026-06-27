@@ -27,6 +27,7 @@
         <template v-else-if="column.key === 'action'">
           <a-space>
             <a-button size="small" @click="editUser(record)">编辑</a-button>
+            <a-button size="small" @click="resetPassword(record)">重置密码</a-button>
             <a-button size="small" @click="adjustBalance(record)">调余额</a-button>
             <a-button size="small" type="primary" @click="impersonate(record)">代登</a-button>
             <a-popconfirm title="确定删除此用户？" @confirm="deleteUser(record.id)">
@@ -92,6 +93,18 @@
         </a-form-item>
       </a-form>
     </a-modal>
+    
+    <a-modal v-model:open="showResetPasswordModal" title="重置密码" @ok="handleResetPassword">
+      <a-form :model="resetPasswordForm" layout="vertical">
+        <a-form-item label="用户名">{{ currentUser?.username }}</a-form-item>
+        <a-form-item label="新密码">
+          <a-input-password v-model:value="resetPasswordForm.password" placeholder="留空则生成随机密码" />
+        </a-form-item>
+        <a-form-item label="确认密码">
+          <a-input-password v-model:value="resetPasswordForm.confirm" placeholder="再次输入新密码" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -107,11 +120,13 @@ const keyword = ref('')
 const showAddModal = ref(false)
 const showEditModal = ref(false)
 const showBalanceModal = ref(false)
+const showResetPasswordModal = ref(false)
 const currentUser = ref(null)
 
 const userForm = ref({ username: '', email: '', password: '', phone: '' })
 const editForm = ref({ id: null, username: '', email: '', phone: '', status: 'active' })
 const balanceForm = ref({ type: 'add', amount: 0, note: '' })
+const resetPasswordForm = ref({ password: '', confirm: '' })
 
 const columns = [
   { title: 'ID', dataIndex: 'id', width: 60 },
@@ -168,6 +183,27 @@ const adjustBalance = (user) => {
   currentUser.value = user
   balanceForm.value = { type: 'add', amount: 0, note: '' }
   showBalanceModal.value = true
+}
+
+const resetPassword = (user) => {
+  currentUser.value = user
+  resetPasswordForm.value = { password: '', confirm: '' }
+  showResetPasswordModal.value = true
+}
+
+const handleResetPassword = async () => {
+  if (resetPasswordForm.value.password && resetPasswordForm.value.password !== resetPasswordForm.value.confirm) {
+    message.warning('两次输入的密码不一致')
+    return
+  }
+  try {
+    await updateUser(currentUser.value.id, { password: resetPasswordForm.value.password })
+    const newPassword = resetPasswordForm.value.password || '系统生成的随机密码'
+    message.success('密码重置成功' + (resetPasswordForm.value.password ? '' : '，请使用系统生成的随机密码'))
+    showResetPasswordModal.value = false
+  } catch (error) {
+    message.error(error.message)
+  }
 }
 
 const handleAdjustBalance = async () => {

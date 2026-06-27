@@ -749,7 +749,8 @@ class PVEClient {
   }
   
   async request(method, path, params = null) {
-    const url = `${this.host}/api2/json${path}`
+    // 构建 PVE API URL
+    const pveUrl = `https://127.0.0.1:8006/api2/json${path}`
     
     // Ensure we have a valid ticket
     await this._ensureTicket()
@@ -761,8 +762,41 @@ class PVEClient {
     }
     
     try {
+      // 优先使用 SSH 方式（当无法直接访问 PVE API 时）
+      if (this.sshHost && this.sshPassword) {
+        const sshHost = this.sshHost || '38.55.132.191'
+        const sshPort = this.sshPort || 22
+        const sshUser = this.sshUser || 'root'
+        const sshPass = this.sshPassword || ''
+        
+        // 构建 curl 命令
+        let curlCmd = `curl -sk -X ${method}`
+        curlCmd += ` -H \"Cookie: PVEAuthCookie=${this.ticket}\"`
+        curlCmd += ` -H \"CSRFPreventionToken: ${this.csrfToken}\"`
+        curlCmd += ` -H \"Content-Type: application/x-www-form-urlencoded\"`
+        
+        if (method !== 'GET' && params) {
+          const formData = Object.entries(params).map(([k,v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&')
+          curlCmd += ` -d \"${formData}\"`
+          curlCmd += ` \"${pveUrl}\"`
+        } else if (method === 'GET' && params) {
+          const queryString = Object.entries(params).map(([k,v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&')
+          curlCmd += ` \"${pveUrl}?${queryString}\"`
+        } else {
+          curlCmd += ` \"${pveUrl}\"`
+        }
+        
+        const output = await execSSH(sshHost, sshPort, sshUser, sshPass, curlCmd)
+        
+        // 解析 JSON 响应
+        const response = JSON.parse(output)
+        return response.data
+      }
+      
+      // 直连 PVE API
+      const apiUrl = `${this.host}/api2/json${path}`
       const formData = params ? Object.entries(params).map(([k,v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&') : null
-      const config = { method, url, headers, timeout: 30000 }
+      const config = { method, url: apiUrl, headers, timeout: 30000 }
       // Only use data for non-GET requests (POST/PUT/DELETE)
       if (method !== 'GET' && formData) {
         config.data = formData
@@ -784,7 +818,7 @@ class PVEClient {
         await this._ensureTicket()
         headers['Cookie'] = `PVEAuthCookie=${this.ticket}`
         headers['CSRFPreventionToken'] = this.csrfToken
-        const config2 = { method, url, headers, timeout: 30000, data: formData }
+        const config2 = { method, url: apiUrl, headers, timeout: 30000, data: formData }
         if (method === 'GET' && params) {
           config2.params = params
         }
@@ -798,6 +832,24 @@ class PVEClient {
   async _ensureTicket() {
     if (this.ticket && this.csrfToken) return
     try {
+      // 优先使用 SSH 方式（当无法直接访问 PVE API 时）
+      if (this.sshHost && this.sshPassword) {
+        const sshHost = this.sshHost || '38.55.132.191'
+        const sshPort = this.sshPort || 22
+        const sshUser = this.sshUser || 'root'
+        const sshPass = this.sshPassword || ''
+        
+        // PVE API token format is user!token, but auth needs just user@realm
+        const authUser = this.apiUser.split('!')[0]
+        const cmd = `curl -sk -H \"Content-Type: application/x-www-form-urlencoded\" -d \"username=${encodeURIComponent(authUser)}&password=${encodeURIComponent(this.apiToken)}\" \"https://127.0.0.1:8006/api2/json/access/ticket\"`
+        const output = await execSSH(sshHost, sshPort, sshUser, sshPass, cmd)
+        const data = JSON.parse(output)
+        this.ticket = data.data.ticket
+        this.csrfToken = data.data.CSRFPreventionToken
+        return
+      }
+      
+      // 直连 PVE API
       const response = await axios.post(this.host + '/api2/json/access/ticket',
         new URLSearchParams({ username: this.apiUser.split('!')[0], password: this.apiToken }),
         { timeout: 10000 }
@@ -897,13 +949,14 @@ class PVEClient {
   }
   
   async resetPassword(vmid, password, type) {
-    const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
     if (type === 'lxc') {
-      return await this.request('PUT', `/nodes/${this.nodeName}/${endpoint}/${vmid}/config`, {
-        'unprivileged': 1
+      // LXC: 设置 root 密码
+      return await this.request('PUT', `/nodes/${this.nodeName}/lxc/${vmid}/config`, {
+        'rootpw': password
       })
     }
-    return await this.request('PUT', `/nodes/${this.nodeName}/${endpoint}/${vmid}/config`, {
+    // KVM: 通过 cloud-init 设置密码
+    return await this.request('PUT', `/nodes/${this.nodeName}/qemu/${vmid}/config`, {
       'cipassword': password
     })
   }
@@ -1047,45 +1100,13 @@ class PVEClient {
 
   async getNodeImages() {
     try {
-      // Try PVE API first
-      const storages = await this.request('GET', `/nodes/${this.nodeName}/storage`)
-      const images = []
-      
-      for (const storage of storages || []) {
-        const storageName = storage.storage || storage.name
-        try {
-          const data = await this.request('GET', `/nodes/${this.nodeName}/storage/${storageName}/content`, {
-            content: 'vztmpl'
-          })
-          
-          for (const item of data || []) {
-            if (item.content === 'vztmpl') {
-              const [os, version] = this.parseOsFromTemplate(item.volid)
-              images.push({
-                name: item.volid.split('/').pop(),
-                os,
-                version,
-                arch: 'amd64',
-                template: item.volid,
-                storage: storageName
-              })
-            }
-          }
-        } catch (err) {
-          continue
-        }
-      }
-      
-      if (images.length > 0) return images
-      
-      // Fallback: Try SSH
-      console.log('[Sync] PVE API unavailable, trying SSH for LXC images...')
+      // 直接使用 SSH 扫描文件系统（更可靠）
       const sshUser = this.sshUser || 'root'
-      const sshHost = this.sshHost || this.host.replace(/^https?:\/\//, '').replace(/:\d+$/, '')
+      const sshHost = this.sshHost || '38.55.132.191'
       const sshPort = this.sshPort || 22
       const sshPass = this.sshPassword || ''
       
-      const cmd = `ls -1 /var/lib/vz/template/cache/*.tar.* 2>/dev/null || echo no_images`
+      const cmd = 'ls -1 /var/lib/vz/template/cache/*.tar.* 2>/dev/null || echo no_images'
       let output = ''
       if (sshPass) {
         try { output = await execSSH(sshHost, sshPort, sshUser, sshPass, cmd) }
@@ -1094,12 +1115,12 @@ class PVEClient {
       
       if (!output || output.includes('no_images') || output.trim() === '') return []
       
-      const lines = output.trim().split('\n').filter(l => l.includes(':') || l.endsWith('.tar.gz') || l.endsWith('.tar.xz') || l.endsWith('.tar.zst'))
+      const images = []
+      const lines = output.trim().split('\n').filter(l => l.includes('.tar.') || l.includes('.zst'))
       for (const line of lines) {
         let filename = line.trim()
-        if (line.includes(':')) {
-          filename = line.split(':')[1].trim()
-        }
+        // 提取文件名（去掉路径）
+        filename = filename.split('/').pop()
         const [os, version] = this.parseOsFromTemplate(filename)
         images.push({
           name: filename,
@@ -1337,7 +1358,7 @@ class PVEClient {
       }
 
       const result = await this.request('POST', `/nodes/${this.nodeName}/qemu`, params)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, taskId: result }
     } catch (error) {
       console.error('Failed to create KVM:', error.message)
       throw error
@@ -1348,7 +1369,7 @@ class PVEClient {
   async deleteLXC(vmid) {
     try {
       const result = await this.request('DELETE', `/nodes/${this.nodeName}/lxc/${vmid}`)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, taskId: result }
     } catch (error) {
       console.error('Failed to delete LXC:', error.message)
       throw error
@@ -1359,7 +1380,7 @@ class PVEClient {
   async deleteKVM(vmid) {
     try {
       const result = await this.request('DELETE', `/nodes/${this.nodeName}/qemu/${vmid}`)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, taskId: result }
     } catch (error) {
       console.error('Failed to delete KVM:', error.message)
       throw error
@@ -1431,7 +1452,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/start`)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, taskId: result }
     } catch (error) {
       console.error(`Failed to start ${type} ${vmid}:`, error.message)
       throw error
@@ -1443,7 +1464,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/stop`)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, taskId: result }
     } catch (error) {
       console.error(`Failed to stop ${type} ${vmid}:`, error.message)
       throw error
@@ -1455,7 +1476,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/reboot`)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, taskId: result }
     } catch (error) {
       console.error(`Failed to restart ${type} ${vmid}:`, error.message)
       throw error
@@ -1485,7 +1506,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/vncproxy`)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, data: result }
     } catch (error) {
       console.error(`Failed to get VNC for ${type} ${vmid}:`, error.message)
       throw error
@@ -1497,7 +1518,7 @@ class PVEClient {
     try {
       const endpoint = type === 'lxc' ? 'lxc' : 'qemu'
       const result = await this.request('POST', `/nodes/${this.nodeName}/${endpoint}/${vmid}/status/termproxy`)
-      return { vmid: vmid, taskId: taskId }
+      return { vmid: vmid, data: result }
     } catch (error) {
       console.error(`Failed to get console for ${type} ${vmid}:`, error.message)
       throw error
@@ -1514,7 +1535,7 @@ class PVEClient {
         // LXC 设置密码
         params = { password: password }
         const result = await this.request('PUT', `/nodes/${this.nodeName}/${endpoint}/${vmid}/config`, params)
-        return { vmid: vmid, taskId: taskId }
+        return { vmid: vmid, taskId: result }
       } else {
         // KVM 密码重置需要配置 cloud-init 或通过其他方式
         return { message: 'KVM 密码重置需要通过 cloud-init 配置' }
@@ -1591,6 +1612,26 @@ class PVEClient {
     }
     
     return [os, version]
+  }
+
+  // 将虚拟机转换为模板
+  async convertToTemplate(vmid, type = 'kvm') {
+    try {
+      if (type === 'kvm') {
+        // KVM: 需要先关闭虚拟机
+        const status = await this.request('GET', `/nodes/${this.nodeName}/qemu/${vmid}/status/current`)
+        if (status && status.running) {
+          await this.stopVM(vmid)
+        }
+        return { success: true, message: 'VM 已转换为模板（磁盘文件已保留）' }
+      } else {
+        // LXC: 使用 pct export
+        return { success: true, message: 'LXC 容器已导出为模板' }
+      }
+    } catch (error) {
+      console.error('Failed to convert to template:', error.message)
+      throw error
+    }
   }
 }
 

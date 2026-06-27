@@ -37,6 +37,30 @@ router.put('/:key', async (req, res) => {
   }
 });
 
+// Update single config by key
+router.put('/update-single', async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    
+    let config = await Config.findOne({ where: { key } });
+    if (!config) {
+      config = await Config.create({ key, value: value || '', type: 'string' });
+    } else {
+      config.value = value || '';
+      await config.save();
+    }
+    
+    // Reinitialize transporter if SMTP config changed
+    if (key.startsWith('smtp_') || key === 'smtp_from') {
+      await initTransporter();
+    }
+    
+    res.json({ code: 200, message: '配置已更新', data: config });
+  } catch (error) {
+    res.json({ code: 500, message: error.message });
+  }
+});
+
 router.post('/test-smtp', async (req, res) => {
   try {
     const { smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure } = req.body;

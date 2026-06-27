@@ -42,10 +42,12 @@ export const getNodeVMs = (id) => request.get(`/admin/nodes/${id}/vms`)
 export const importVM = (nodeId, data) => request.post(`/admin/nodes/${nodeId}/import-vm`, data)
 
 export const getImages = (params) => request.get('/admin/images', { params })
-export const getImage = (id) => request.get(`/admin/images/${id}`)
 export const createImage = (data) => request.post('/admin/images', data)
 export const updateImage = (id, data) => request.put(`/admin/images/${id}`, data)
 export const deleteImage = (id) => request.delete(`/admin/images/${id}`)
+export const getImage = (id) => request.get(`/admin/images/${id}`)
+
+export const convertServiceToTemplate = (id) => request.post(`/admin/services/${id}/convert-to-template`)
 
 export const getConfigs = () => request.get('/admin/configs')
 export const updateConfigs = (data) => request.put('/admin/configs', data)

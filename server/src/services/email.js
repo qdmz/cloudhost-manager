@@ -17,17 +17,27 @@ class EmailService {
 
   initTransporter(cfg) {
     try {
+      const host = (cfg && cfg.host) || process.env.SMTP_HOST || ''
+      const port = (cfg && cfg.port) ? parseInt(cfg.port) : (parseInt(process.env.SMTP_PORT) || 465)
+      const secure = (cfg && cfg.secure !== undefined) ? cfg.secure : (process.env.SMTP_SECURE === 'true')
+      const user = (cfg && cfg.user) || process.env.SMTP_USER || ''
+      const pass = (cfg && cfg.pass) || process.env.SMTP_PASS || ''
+      
+      // 如果没有配置 SMTP，transporter 保持为 null
+      if (!host) {
+        this.transporter = null
+        return
+      }
+      
       this.transporter = nodemailer.createTransport({
-        host: (cfg && cfg.host) || process.env.SMTP_HOST || 'smtp.qq.com',
-        port: (cfg && cfg.port) ? parseInt(cfg.port) : (parseInt(process.env.SMTP_PORT) || 465),
-        secure: (cfg && cfg.secure !== undefined) ? cfg.secure : (process.env.SMTP_SECURE === 'true'),
-        auth: {
-          user: (cfg && cfg.user) || process.env.SMTP_USER || '',
-          pass: (cfg && cfg.pass) || process.env.SMTP_PASS || ''
-        }
+        host,
+        port,
+        secure,
+        auth: user && pass ? { user, pass } : undefined
       })
     } catch (error) {
       console.error('[Email] Transporter init failed:', error.message)
+      this.transporter = null
     }
   }
 
@@ -161,7 +171,7 @@ class EmailService {
       }
 
       const info = await this.transporter.sendMail({
-        from: `"CloudHost" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+        from: process.env.SMTP_FROM || process.env.SMTP_USER || `CloudHost <noreply@${this.transporter.options.host}>`,
         to,
         subject,
         html
@@ -184,7 +194,7 @@ class EmailService {
       }
 
       const info = await this.transporter.sendMail({
-        from: `"CloudHost" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+        from: process.env.SMTP_FROM || process.env.SMTP_USER || `CloudHost <noreply@${this.transporter.options.host}>`,
         to,
         subject,
         html

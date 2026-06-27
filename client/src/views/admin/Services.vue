@@ -16,6 +16,9 @@
             <a-button size="small" @click="viewDetail(record)">详情</a-button>
             <a-button size="small" @click="openEditModal(record)">编辑</a-button>
             <a-button size="small" type="dashed" @click="openTransferModal(record)">转移</a-button>
+            <a-popconfirm title="确定转换为模板？" @confirm="convertToTemplate(record)">
+              <a-button size="small" ghost>转模板</a-button>
+            </a-popconfirm>
             <a-popconfirm title="确定删除？" @confirm="handleDelete(record.id)">
               <a-button size="small" danger>删除</a-button>
             </a-popconfirm>
@@ -74,14 +77,42 @@
         <a-form-item label="MAC 地址">
           <a-input v-model:value="editForm.mac" placeholder="如: BC:24:11:00:00:01" />
         </a-form-item>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="月价格 (元)">
+              <a-input-number v-model:value="editForm.price_monthly" :min="0" :precision="2" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="季价格 (元)">
+              <a-input-number v-model:value="editForm.price_quarterly" :min="0" :precision="2" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="年价格 (元)">
+              <a-input-number v-model:value="editForm.price_yearly" :min="0" :precision="2" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="到期时间">
+              <a-date-picker v-model:value="editForm.expire_time" show-time style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
       </a-form>
     </a-modal>
     
     <!-- 转移服务弹窗 -->
     <a-modal v-model:open="showTransferModal" title="转移虚拟机" @ok="handleTransferOk" @cancel="showTransferModal = false" :confirmLoading="transferLoading">
       <a-form :model="transferForm" layout="vertical">
-        <a-form-item label="目标用户ID">
-          <a-input v-model:value="transferForm.target_user_id" placeholder="请输入目标用户ID" />
+        <a-form-item label="目标用户">
+          <a-select v-model:value="transferForm.target_user_id" placeholder="请选择目标用户" show-search :filter-option="filterUserOption">
+            <a-select-option v-for="user in userList" :key="user.id" :value="user.id">
+              {{ user.username }} (ID: {{ user.id }})
+            </a-select-option>
+          </a-select>
         </a-form-item>
       </a-form>
     </a-modal>
@@ -91,7 +122,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
-import { getServices, deleteService, updateService, transferService, getUsers } from '@/api/admin'
+import { getServices, deleteService, updateService, transferService, getUsers, convertServiceToTemplate } from '@/api/admin'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -117,7 +148,11 @@ const editForm = ref({
   ipv6: '',
   ssh_port: null,
   vnc_port: null,
-  mac: ''
+  mac: '',
+  price_monthly: 0,
+  price_quarterly: 0,
+  price_yearly: 0,
+  expire_time: null
 })
 
 // 转移相关
@@ -125,8 +160,13 @@ const showTransferModal = ref(false)
 const transferLoading = ref(false)
 const transferringService = ref(null)
 const transferForm = ref({
-  target_user_id: ''
+  target_user_id: null
 })
+const userList = ref([])
+
+const filterUserOption = (input, option) => {
+  return option.children[0].children.toLowerCase().includes(input.toLowerCase())
+}
 
 const columns = [
   { title: 'ID', dataIndex: 'id', width: 60 },
@@ -193,7 +233,11 @@ const openEditModal = (record) => {
     ipv6: record.ipv6 || '',
     ssh_port: record.ssh_port || null,
     vnc_port: record.vnc_port || null,
-    mac: record.mac || ''
+    mac: record.mac || '',
+    price_monthly: record.price_monthly || 0,
+    price_quarterly: record.price_quarterly || 0,
+    price_yearly: record.price_yearly || 0,
+    expire_time: record.expire_time ? record.expire_time : null
   }
   showEditModal.value = true
 }
@@ -212,15 +256,23 @@ const handleEditOk = async () => {
   }
 }
 
-const openTransferModal = (record) => {
+const openTransferModal = async (record) => {
   transferringService.value = record
-  transferForm.value.target_user_id = ''
+  transferForm.value.target_user_id = null
   showTransferModal.value = true
+  // 加载用户列表
+  try {
+    const res = await getUsers({ page: 1, pageSize: 100 })
+    userList.value = res.data?.list || res.data || []
+  } catch (e) {
+    console.error('Failed to load users:', e)
+    userList.value = []
+  }
 }
 
 const handleTransferOk = async () => {
   if (!transferForm.value.target_user_id) {
-    message.warning('请输入目标用户ID')
+    message.warning('请选择目标用户')
     return
   }
   transferLoading.value = true
@@ -243,6 +295,16 @@ const handleDelete = async (id) => {
     fetchServices()
   } catch (error) {
     message.error(error.message)
+  }
+}
+
+const convertToTemplate = async (record) => {
+  try {
+    await convertServiceToTemplate(record.id)
+    message.success('转换成功')
+    fetchServices()
+  } catch (error) {
+    message.error(error.message || '转换失败')
   }
 }
 

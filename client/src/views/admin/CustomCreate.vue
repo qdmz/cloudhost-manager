@@ -36,7 +36,7 @@
           </a-col>
           <a-col :span="12">
             <a-form-item label="虚拟化类型" name="type">
-              <a-select v-model:value="form.type">
+              <a-select v-model:value="form.type" @change="onTypeChange">
                 <a-select-option value="kvm">KVM</a-select-option>
                 <a-select-option value="lxc">LXC</a-select-option>
                 <a-select-option value="lxd">LXD</a-select-option>
@@ -224,14 +224,25 @@ const onNodeChange = async (nodeId) => {
     form.value.ipv4 = ips.ipv4
     form.value.ipv6 = ips.ipv6
   }
-  // 加载该节点的镜像
+  // 加载该节点的镜像（根据虚拟化类型过滤）
   try {
-    const res = await getImages({ node_id: nodeId })
+    const params = { node_id: nodeId }
+    if (form.value.type === 'lxc' || form.value.type === 'lxd' || form.value.type === 'incus') {
+      params.type = 'lxc'
+    }
+    const res = await getImages(params)
     images.value = Array.isArray(res.data) ? res.data : (res.data?.list || [])
     form.value.image_id = null
   } catch (error) {
     console.error("Failed to load images:", error)
     images.value = []
+  }
+}
+
+// 虚拟化类型变化时重新加载镜像
+const onTypeChange = async () => {
+  if (form.value.node_id) {
+    await onNodeChange(form.value.node_id)
   }
 }
 

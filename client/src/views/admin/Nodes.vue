@@ -240,7 +240,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
- import { getNodes as apiGetNodes, createNode, updateNode, deleteNode, syncNode, syncNodeImages, testSshConnection as apiTestSsh, testPVEConnection as apiTestPVE, getDomainBindings, updateDomainBinding, deleteDomainBinding, getPortForwards, updatePortForward, deletePortForward, importVM } from "@/api/admin";
+ import { getNodes as apiGetNodes, createNode, updateNode, deleteNode, syncNode, syncNodeImages, testSshConnection as apiTestSsh, testPVEConnection as apiTestPVE, getDomainBindings, updateDomainBinding, deleteDomainBinding, getPortForwards, updatePortForward, deletePortForward, importVM, getImages, createImage, updateImage, deleteImage } from "@/api/admin";
 import { message } from 'ant-design-vue'
 
 const loading = ref(false)
@@ -345,7 +345,8 @@ const handleEditNode = (node) => {
     type: node.type || 'pve',
     host: node.host || '',
     api_user: node.api_user || '',
-    api_token: '',
+    api_token: node.api_token || '',
+    api_token_visible: !!node.api_token,
     location: node.location || '',
     nat_bridge: node.nat_bridge || 'vmbr1',
     ipv6_bridge: node.ipv6_bridge || 'vmbr2',
@@ -394,14 +395,12 @@ const handleTestSsh = async () => {
 
 const handleSyncNode = async (node) => {
   try {
-    message.loading('正在同步节点...', 0)
+    message.loading('正在同步节点...')
     await apiSyncNode(node.id)
     message.success('节点同步成功')
     fetchNodes()
   } catch (error) {
     message.error(error.message)
-  } finally {
-    message.destroy()
   }
 }
 
@@ -420,21 +419,18 @@ const handleTestPve = async (node) => {
 
 const syncImages = async (node) => {
   try {
-    message.loading('正在同步镜像...', 0)
-    const res = await apiSyncNodeImages(node.id)
-    message.destroy()
-    const count = res.data?.length || 0
+    message.loading('正在同步镜像...')
+    const res = await syncNodeImages(node.id)
+    const count = res.data?.list?.length || res.data?.length || 0
     message.success(`镜像同步成功，共 ${count} 个`)
     // 刷新镜像列表
     if (currentNode.value && currentNode.value.id === node.id) {
       try {
-        const { getImages } = await import('@/api/admin')
         const imgRes = await getImages({ node_id: node.id })
         images.value = imgRes.data?.list || imgRes.data || []
       } catch {}
     }
   } catch (error) {
-    message.destroy()
     message.error('镜像同步失败: ' + (error.message || '未知错误'))
   }
 }

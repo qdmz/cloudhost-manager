@@ -4,6 +4,27 @@ const { Service, Node, Product, Plan, User, BalanceLog, Order } = require('../mo
 const { auth } = require('../middleware/auth')
 const { vmService } = require('../services/vm')
 
+// Helper: check if service is expired and auto-stop if needed
+async function checkServiceExpired(service) {
+  if (!service) return null
+  
+  // Check expiration
+  if (new Date(service.expire_time) < new Date()) {
+    // Auto-stop the VM if running
+    if (service.status === 'running') {
+      try {
+        await vmService.stop(service)
+        await service.update({ status: 'suspended' })
+      } catch (e) {
+        console.error('[Services] Auto-stop failed for service', service.id, ':', e.message)
+        await service.update({ status: 'suspended' })
+      }
+    }
+    return new Date(service.expire_time)
+  }
+  return null
+}
+
 // List user services
 router.get('/', auth, async (req, res) => {
   try {
@@ -62,6 +83,12 @@ router.post('/:id/start', auth, async (req, res) => {
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
     
+    // Check expiration
+    const expiredAt = await checkServiceExpired(service)
+    if (expiredAt) {
+      return res.json({ code: 400, message: `服务已过期（${expiredAt.toLocaleString()}），已自动停机。请续费后使用。` })
+    }
+    
     const result = await vmService.start(service)
     await service.update({ status: 'running' })
     res.json({ code: 200, message: '服务已启动' })
@@ -98,6 +125,12 @@ router.post('/:id/restart', auth, async (req, res) => {
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
     
+    // Check expiration
+    const expiredAt = await checkServiceExpired(service)
+    if (expiredAt) {
+      return res.json({ code: 400, message: `服务已过期（${expiredAt.toLocaleString()}），已自动停机。请续费后使用。` })
+    }
+    
     const result = await vmService.restart(service)
     res.json({ code: 200, message: '服务已重启' })
   } catch (error) {
@@ -115,6 +148,12 @@ router.post('/:id/reset-password', auth, async (req, res) => {
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
     
+    // Check expiration
+    const expiredAt = await checkServiceExpired(service)
+    if (expiredAt) {
+      return res.json({ code: 400, message: `服务已过期（${expiredAt.toLocaleString()}），已自动停机。请续费后使用。` })
+    }
+    
     const result = await vmService.resetPassword(service, req.body.password)
     res.json({ code: 200, message: '密码重置成功', data: result })
   } catch (error) {
@@ -131,6 +170,12 @@ router.post('/:id/reinstall', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    
+    // Check expiration
+    const expiredAt = await checkServiceExpired(service)
+    if (expiredAt) {
+      return res.json({ code: 400, message: `服务已过期（${expiredAt.toLocaleString()}），已自动停机。请续费后使用。` })
+    }
     
     // Support both imageId and image_id
     const imageId = req.body.imageId || req.body.image_id
@@ -156,6 +201,11 @@ router.post('/:id/renew', auth, async (req, res) => {
     })
     
     if (!service) return res.json({ code: 404, message: '服务不存在' })
+    
+    // Check if service is expired
+    if (new Date(service.expire_time) < new Date()) {
+      return res.json({ code: 400, message: '服务已过期，无法续费，请联系客服' })
+    }
     
     const { cycle, payment_method } = req.body
     
@@ -219,6 +269,7 @@ router.post('/:id/renew', auth, async (req, res) => {
     const order = await Order.create({
       user_id: req.userId,
       order_no: orderNo,
+      service_id: service.id,
       product_id: service.product_id,
       plan_id: service.plan_id,
       node_id: service.node_id,

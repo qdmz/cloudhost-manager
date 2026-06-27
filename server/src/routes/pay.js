@@ -233,16 +233,69 @@ async function handlePayment(params, res) {
     
     console.log('[Payment] Recharge completed, new balance:', oldBalance + addAmount)
   } else {
-    // 检查是否是商品订单
+    // 检查是否是商品订单或续费订单
     const order = await Order.findOne({ where: { order_no: outTradeNo } })
     
     if (order && order.status === 'pending') {
       console.log('[Payment] Processing order:', outTradeNo)
-      await processPaymentSuccess(order, tradeNo, order.user_id)
+      
+      // Check if this is a renewal order (has service_id)
+      if (order.service_id) {
+        // Renewal order - update service expire_time
+        const service = await Service.findByPk(order.service_id)
+        if (service) {
+          let expireDays = 30
+          if (order.cycle === 'quarterly') expireDays = 90
+          if (order.cycle === 'yearly') expireDays = 365
+          
+          await service.update({
+            expire_time: new Date(service.expire_time.getTime() + expireDays * 86400000)
+          })
+          await order.update({ status: 'paid', paid_at: new Date(), trade_no: tradeNo })
+          console.log(`[Payment] Renewal completed for service ${service.id}, new expire: ${service.expire_time}`)
+        }
+      } else {
+        // New purchase order
+        await processPaymentSuccess(order, tradeNo, order.user_id)
+      }
     }
   }
   
   res.send('success')
 }
+
+// 获取易支付支持的支付方式列表
+router.get('/payment-methods', async (req, res) => {
+  try {
+    const epayService = require('../services/epay')
+    const config = await epayService.getConfig()
+    
+    // 如果未配置易支付，返回默认支付方式
+    if (!config.epayUrl || config.epayUrl === 'https://epay.example.com/submit.php') {
+      return res.json({
+        code: 200,
+        data: [
+          { value: 'alipay', name: '支付宝', icon: 'alipay' },
+          { value: 'wechat', name: '微信支付', icon: 'wechat' },
+          { value: 'qqpay', name: 'QQ钱包', icon: 'qq' }
+        ]
+      })
+    }
+    
+    // 从易支付配置中获取支持的支付方式
+    // 不同易支付平台支持的 type 可能不同，这里返回常见类型
+    const methods = [
+      { value: 'alipay', name: '支付宝', icon: 'alipay' },
+      { value: 'wechat', name: '微信支付', icon: 'wechat' },
+      { value: 'qqpay', name: 'QQ钱包', icon: 'qq' },
+      { value: 'unionpay', name: '银联支付', icon: 'creditcard' }
+    ]
+    
+    res.json({ code: 200, data: methods })
+  } catch (error) {
+    console.error('[Payment] Get payment methods error:', error)
+    res.json({ code: 500, message: '获取支付方式失败' })
+  }
+})
 
 module.exports = router

@@ -87,6 +87,7 @@ const Order = sequelize.define('Order', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   user_id: { type: DataTypes.INTEGER, allowNull: false },
   order_no: { type: DataTypes.STRING(32), unique: true, allowNull: false },
+  service_id: { type: DataTypes.INTEGER, allowNull: true },
   product_id: { type: DataTypes.INTEGER, allowNull: true },
   plan_id: { type: DataTypes.INTEGER, allowNull: true },
   node_id: { type: DataTypes.INTEGER, allowNull: false },
@@ -139,6 +140,7 @@ const Image = sequelize.define('Image', {
   os: { type: DataTypes.STRING(50), allowNull: false },
   version: { type: DataTypes.STRING(50) },
   arch: { type: DataTypes.STRING(20), defaultValue: 'amd64' },
+  type: { type: DataTypes.ENUM('lxc', 'vm'), defaultValue: 'lxc' },
   template: { type: DataTypes.STRING(255) },
   status: { type: DataTypes.ENUM('active', 'inactive'), defaultValue: 'active' }
 }, { tableName: 'images', timestamps: true, underscored: true })
@@ -268,6 +270,7 @@ Plan.belongsTo(Product, { foreignKey: 'product_id' })
 
 User.hasMany(Order, { foreignKey: 'user_id' })
 Order.belongsTo(User, { foreignKey: 'user_id', as: 'user' })
+Order.belongsTo(Service, { foreignKey: 'service_id', as: 'service' })
 Order.belongsTo(Product, { foreignKey: 'product_id', as: 'product' })
 Order.belongsTo(Plan, { foreignKey: 'plan_id', as: 'plan' })
 Order.belongsTo(Node, { foreignKey: 'node_id', as: 'node' })
