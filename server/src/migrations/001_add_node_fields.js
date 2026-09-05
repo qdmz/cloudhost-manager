@@ -1,53 +1,31 @@
 /**
  * 数据库迁移脚本
- * 添加节点表的缺失字段
- * 运行方式: node src/migrations/001_add_node_fields.js
+ * 添加节点表 / 镜像表 / 产品表的缺失字段（兼容 MySQL 与 MariaDB，幂等可重复执行）
+ * 运行方式: node src/scripts/migrate.js   （通过迁移统一执行）
  */
 
-const { sequelize } = require('../models')
+const { addColumnIfMissing } = require('./_utils')
 
-async function migrate() {
-  try {
-    console.log('开始执行数据库迁移...')
-    
-    // 添加节点表的字段
-    await sequelize.query(`
-      ALTER TABLE nodes 
-      ADD COLUMN IF NOT EXISTS ipv4_range_start VARCHAR(50) DEFAULT NULL AFTER max_ports_per_vm,
-      ADD COLUMN IF NOT EXISTS ipv4_range_end VARCHAR(50) DEFAULT NULL AFTER ipv4_range_start,
-      ADD COLUMN IF NOT EXISTS ipv6_prefix VARCHAR(100) DEFAULT NULL AFTER ipv4_range_end,
-      ADD COLUMN IF NOT EXISTS ssh_host VARCHAR(255) DEFAULT NULL AFTER host,
-      ADD COLUMN IF NOT EXISTS ssh_port INT DEFAULT 22 AFTER ssh_host,
-      ADD COLUMN IF NOT EXISTS ssh_username VARCHAR(50) DEFAULT 'root' AFTER ssh_port,
-      ADD COLUMN IF NOT EXISTS ssh_password VARCHAR(255) DEFAULT NULL AFTER ssh_username,
-      ADD COLUMN IF NOT EXISTS ssh_enabled TINYINT(1) DEFAULT 0 AFTER ssh_password
-    `)
-    
-    console.log('✓ 节点表字段添加完成')
-    
-    // 添加镜像表的 type 字段
-    await sequelize.query(`
-      ALTER TABLE images 
-      ADD COLUMN IF NOT EXISTS type ENUM('lxc', 'vm') DEFAULT 'lxc' AFTER arch
-    `)
-    
-    console.log('✓ 镜像表 type 字段添加完成')
-    
-    // 添加 products 表的 image_id 字段（如果不存在）
-    await sequelize.query(`
-      ALTER TABLE products 
-      ADD COLUMN IF NOT EXISTS image_id INT DEFAULT NULL AFTER node_id
-    `)
-    
-    console.log('✓ 产品表 image_id 字段添加完成')
-    
-    console.log('数据库迁移完成！')
-  } catch (error) {
-    console.error('迁移失败:', error.message)
-    throw error
-  } finally {
-    await sequelize.close()
-  }
+async function up(sequelize) {
+  console.log('== [001] 节点/镜像/产品基础字段 ==')
+
+  // 节点表字段
+  await addColumnIfMissing(sequelize, 'nodes', 'ipv4_range_start', 'ipv4_range_start VARCHAR(50) DEFAULT NULL')
+  await addColumnIfMissing(sequelize, 'nodes', 'ipv4_range_end', 'ipv4_range_end VARCHAR(50) DEFAULT NULL')
+  await addColumnIfMissing(sequelize, 'nodes', 'ipv6_prefix', 'ipv6_prefix VARCHAR(100) DEFAULT NULL')
+  await addColumnIfMissing(sequelize, 'nodes', 'ssh_host', 'ssh_host VARCHAR(255) DEFAULT NULL')
+  await addColumnIfMissing(sequelize, 'nodes', 'ssh_port', 'ssh_port INT DEFAULT 22')
+  await addColumnIfMissing(sequelize, 'nodes', 'ssh_username', "ssh_username VARCHAR(50) DEFAULT 'root'")
+  await addColumnIfMissing(sequelize, 'nodes', 'ssh_password', 'ssh_password VARCHAR(255) DEFAULT NULL')
+  await addColumnIfMissing(sequelize, 'nodes', 'ssh_enabled', 'ssh_enabled TINYINT(1) DEFAULT 0')
+
+  // 镜像表 type 字段
+  await addColumnIfMissing(sequelize, 'images', 'type', "type ENUM('lxc','vm') DEFAULT 'lxc'")
+
+  // 产品表 image_id 字段
+  await addColumnIfMissing(sequelize, 'products', 'image_id', 'image_id INT DEFAULT NULL')
+
+  console.log('== [001] 完成 ==')
 }
 
-migrate()
+module.exports = { up }

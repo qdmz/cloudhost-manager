@@ -5,7 +5,7 @@
 
 const http = require('http')
 const url = require('url')
-const { ConsoleService } = require('../services/console')
+const consoleService = require('../services/console')
 
 let wss = null
 
@@ -40,7 +40,7 @@ function init(server) {
       return
     }
 
-    const session = ConsoleService.sessions?.get(sessionId)
+    const session = consoleService.sessions?.get(sessionId)
     if (!session || !session.stream) {
       ws.send(JSON.stringify({ type: 'error', message: '会话不存在' }))
       ws.close(4000, 'Session not found')
@@ -75,13 +75,13 @@ function init(server) {
     // 前端断开 → 关闭 SSH 会话
     ws.on('close', () => {
       session.stream.end()
-      ConsoleService.sessions.delete(sessionId)
+      consoleService.sessions.delete(sessionId)
     })
 
     ws.on('error', (err) => {
       console.error('[Console WS] Error:', err.message)
       session.stream.end()
-      ConsoleService.sessions.delete(sessionId)
+      consoleService.sessions.delete(sessionId)
     })
   })
 }

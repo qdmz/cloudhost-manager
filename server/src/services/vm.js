@@ -91,7 +91,7 @@ async function getNodeResources(node) {
 }
 
 const axios = require('axios')
-const { Node, Image, Service, User } = require('../models')
+const { Node, Image, Service, User, Product } = require('../models')
 const { Op } = require("sequelize")
 
 class VMService {
@@ -100,11 +100,18 @@ class VMService {
   }
   
   async getClient(node) {
-    if (!this.nodes.has(node.id)) {
-      const client = new PVEClient(node)
-      this.nodes.set(node.id, client)
+    if (!node) throw new Error('缺少节点信息')
+    // 智简魔方节点走独立驱动
+    if (node.type === 'zjmf') {
+      const zjmf = require('./zjmf')
+      return zjmf.getClient(node)
     }
-    return this.nodes.get(node.id)
+    const key = `pve_${node.id}`
+    if (!this.nodes.has(key)) {
+      const client = new PVEClient(node)
+      this.nodes.set(key, client)
+    }
+    return this.nodes.get(key)
   }
   
   async start(service) {
@@ -170,7 +177,7 @@ class VMService {
     if (!node) throw new Error('节点不存在')
     
     const client = await this.getClient(node)
-    if (!service.vmid) throw new Error(虚拟机未创建)
+    if (!service.vmid) throw new Error('虚拟机未创建')
     return await client.getVNCUrl(service.vmid, service.type)
   }
   
@@ -199,6 +206,10 @@ class VMService {
 
 
   async syncVMsFromNode(node) {
+    // 智简魔方：同步上游账户下开通的主机
+    if (node.type === 'zjmf') {
+      return await this.syncZJMFVMs(node)
+    }
     const client = await this.getClient(node)
     
     const qemus = await client.getQemuVMs()
@@ -270,9 +281,142 @@ class VMService {
     return allVMs
   }
 
+  // 把上游状态映射为本地服务状态
+  _mapZjmfStatus(status) {
+    const s = String(status || '').toLowerCase()
+    if (['running', 'on', 'online', 'active', '1', '开机', '运行中'].includes(s)) return 'running'
+    if (['stopped', 'off', 'suspend', 'paused', '0', '关机', '已暂停'].includes(s)) return 'stopped'
+    return 'running'
+  }
 
+  /**
+   * 智简魔方节点同步：把上游账户下的远端主机导入/更新到本地服务表
+   * 说明：只做新增与更新，不自动删除，避免误删“开通中”的 pending 记录。
+   */
+  async syncZJMFVMs(node) {
+    const zjmf = require('./zjmf')
+    const client = zjmf.getClient(node)
+    const hosts = await client.listRemoteHosts()
+
+    let defaultUser = await User.findOne({ where: { username: 'admin' } })
+    if (!defaultUser) defaultUser = await User.findOne()
+
+    const remoteIds = new Set(hosts.map((h) => h.id))
+    const updated = []
+    for (const h of hosts) {
+      let existing = await Service.findOne({
+        where: { node_id: node.id, vmid: h.id }
+      })
+      const status = this._mapZjmfStatus(h.status)
+      if (existing) {
+        await existing.update({
+          name: h.name || existing.name,
+          status: status === 'running' && existing.status === 'pending' ? 'running' : existing.status,
+          ipv4: h.ipv4 || existing.ipv4,
+          ipv6: h.ipv6 || existing.ipv6,
+          os: h.os || existing.os,
+          password: h.password || existing.password
+        })
+        updated.push(existing)
+      } else {
+        const svc = await Service.create({
+          user_id: defaultUser ? defaultUser.id : 1,
+          node_id: node.id,
+          name: h.name || `ZJMF-${h.id}`,
+          type: 'zjmf',
+          status: 'running',
+          cpu: 0,
+          memory: 0,
+          disk: 0,
+          vmid: h.id,
+          ipv4: h.ipv4 || '',
+          ipv6: h.ipv6 || '',
+          os: h.os || 'Unknown',
+          password: h.password || '',
+          price: 0,
+          expire_time: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+        })
+        updated.push(svc)
+      }
+    }
+
+    // 将处于 pending 且能在上游找到主机ID的本地服务补齐 vmid
+    if (hosts.length) {
+      const pendings = await Service.findAll({
+        where: { node_id: node.id, status: 'pending', vmid: null }
+      })
+      for (const p of pendings) {
+        const hit = hosts.find((h) => h.name && p.name && h.name.includes(p.name.replace(/-?\d+$/, '')))
+        if (hit && !remoteIds.has(hit.id)) {
+          await p.update({ vmid: hit.id, status: 'running', ipv4: hit.ipv4 || '', os: hit.os || p.os })
+        }
+      }
+    }
+
+    return hosts.map((h) => ({ vmid: h.id, name: h.name, status: h.status }))
+  }
+
+  /**
+   * 智简魔方节点同步镜像：遍历节点下所有已映射上游产品的商品，取其可开通
+   * 操作系统镜像写入本地 images 表（template 存上游镜像ID），并缓存商品配置。
+   */
+  async syncZJMFImages(node) {
+    const zjmf = require('./zjmf')
+    const client = zjmf.getClient(node)
+    const products = await Product.findAll({ where: { node_id: node.id } })
+
+    const collected = []
+    for (const p of products) {
+      if (!p.upstream_product_id) continue
+      let cfg = null
+      try {
+        cfg = await client.getProductConfig(p.upstream_product_id)
+      } catch (e) {
+        console.warn(`[ZJMF] 获取上游商品 ${p.upstream_product_id} 配置失败: ${e.message}`)
+        continue
+      }
+      if (!cfg) continue
+
+      // 兼容多种返回形态
+      let imgList = Array.isArray(cfg) ? cfg : null
+      if (!imgList) {
+        const probe = cfg.os_list || cfg.os || cfg.images || cfg.templates || cfg.system || cfg.option || cfg.configoptions
+        if (Array.isArray(probe)) imgList = probe
+      }
+      if (Array.isArray(imgList)) {
+        for (const img of imgList) {
+          const template = String(img.id ?? img.template ?? img.value ?? img.os ?? '')
+          const label = img.name || img.label || img.os_name || img.title || ''
+          if (!template) continue
+          const existing = await Image.findOne({
+            where: { node_id: node.id, template }
+          })
+          if (existing) {
+            await existing.update({ name: label || existing.name, os: label || existing.os, status: 'active' })
+          } else {
+            await Image.create({
+              node_id: node.id,
+              name: label || template,
+              os: label || template,
+              version: '',
+              arch: 'amd64',
+              type: 'vm',
+              template,
+              status: 'active'
+            })
+          }
+          collected.push({ template, name: label })
+        }
+      }
+      await p.update({ upstream_data: JSON.stringify({ config: cfg, synced_at: new Date().toISOString() }) })
+    }
+    return collected
+  }
 
   async syncImagesFromNode(node) {
+    if (node.type === 'zjmf') {
+      return await this.syncZJMFImages(node)
+    }
     const client = await this.getClient(node)
     
     const lxcImages = await client.getNodeImages()
@@ -399,6 +543,12 @@ class VMService {
       }
     }
     
+    // 智简魔方：代理开通（向上游下单支付，由上游自动开通）
+    if (node.type === 'zjmf') {
+      const resolved = { ...options, type: vmType || 'zjmf', template: osTemplate }
+      return await this.createZJMFVM(node, resolved)
+    }
+    
     const client = await this.getClient(node)
     
     // 生成下一个可用VMID
@@ -418,6 +568,68 @@ class VMService {
     } else {
       // 创建KVM虚拟机
       return await this.createKVM(client, nextVmid, { ...resolvedOptions, serviceId: options.serviceId }, node)
+    }
+  }
+
+  /**
+   * 智简魔方节点：代理开通上游产品
+   * 流程：登录上游 -> 提交订单 -> 余额支付（自动） -> 上游自动开通 -> 回写远端主机ID/信息
+   */
+  async createZJMFVM(node, options) {
+    const zjmf = require('./zjmf')
+    const client = zjmf.getClient(node)
+
+    const product = options.productId
+      ? await Product.findByPk(options.productId)
+      : null
+    const upstreamProductId =
+      (product && product.upstream_product_id) || options.upstreamProductId || ''
+
+    if (!upstreamProductId) {
+      throw new Error('该产品未配置上游智简魔方产品ID，请先在管理后台完成映射')
+    }
+
+    const osId = options.template || options.os || (product && product.default_os) || ''
+    const cycle = options.cycle || 'monthly'
+
+    const provision = await client.provisionUpstreamHost({
+      upstreamProductId,
+      billingCycle: cycle,
+      quantity: options.quantity || 1,
+      name: options.name || (product && product.name) || 'VM',
+      os: osId,
+      password: options.password || '',
+      extra: options.upstreamExtra || {}
+    })
+
+    // 上游支付后一般会自动开通，尝试立即拉取一次开通结果
+    let host = null
+    try {
+      host = await client.fetchRemoteHost({ orderId: provision.orderId, hostId: options.hostId })
+    } catch (e) {
+      console.warn('[ZJMF] 开通结果查询失败（稍后可通过同步补充）:', e.message)
+    }
+
+    const vmid = host && host.id ? host.id : ''
+    if (!vmid) {
+      const err = new Error(
+        '上游订单已提交，但尚未返回远端主机ID，产品将保持“开通中”状态；' +
+        '可稍后在上游确认开通后，点击节点“同步主机”自动补充。'
+      )
+      err.orderId = provision.orderId || ''
+      throw err
+    }
+
+    return {
+      success: true,
+      vmid: String(vmid),
+      orderId: provision.orderId || '',
+      ipv4: (host && host.ipv4) || '',
+      ipv6: (host && host.ipv6) || '',
+      os: (host && host.os) || osId,
+      password: (host && host.password) || options.password || '',
+      username: (host && host.username) || 'root',
+      message: `上游订单 ${provision.orderId || ''} 已支付，远端主机 ${vmid} 开通成功`
     }
   }
 

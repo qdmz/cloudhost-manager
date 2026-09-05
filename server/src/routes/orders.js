@@ -21,9 +21,11 @@ router.post('/', auth, async (req, res) => {
     const plan = await Plan.findByPk(plan_id)
     if (!plan) return res.json({ code: 404, message: '配置方案不存在' })
     
+    // 未指定节点时，使用产品默认节点（智简魔方等单节点产品必须能直接下单）
+    const effectiveNodeId = node_id || product.node_id || null
     let node
-    if (node_id) {
-      node = await Node.findByPk(node_id)
+    if (effectiveNodeId) {
+      node = await Node.findByPk(effectiveNodeId)
       if (!node) return res.json({ code: 404, message: '节点不存在' })
     }
     
@@ -40,7 +42,7 @@ router.post('/', auth, async (req, res) => {
       order_no: orderNo,
       product_id,
       plan_id,
-      node_id: node_id || null,
+      node_id: effectiveNodeId,
       cycle,
       quantity,
       amount: totalAmount,
@@ -171,53 +173,12 @@ router.post('/:id/pay', auth, async (req, res) => {
         }, { transaction: t })
       })
       
-      // Auto-create service
+      // Auto-create service（余额支付成功后自动开通，支持 PVE/Incus 与 智简魔方 节点）
       if (order.plan_id && order.node_id && order.product_id) {
-        const vmService = require('../services/vm')
-        const plan = await Plan.findByPk(order.plan_id)
-        const node = await Node.findByPk(order.node_id)
-        const product = await Product.findByPk(order.product_id)
-        
-        let expireDays = 30
-        if (order.cycle === 'quarterly') expireDays = 90
-        if (order.cycle === 'yearly') expireDays = 365
-        const expireAt = new Date()
-        expireAt.setDate(expireAt.getDate() + expireDays)
-        
-        for (let i = 0; i < (order.quantity || 1); i++) {
-          let pveVmid = ''
-          try {
-            const pveResult = await vmService.createVM(order.node_id, {
-              name: product.name + '-' + (i + 1),
-              type: product.type || 'kvm',
-              cpu: plan.cpu,
-              memory: plan.memory,
-              disk: plan.disk,
-              bandwidth: plan.bandwidth,
-              traffic: plan.traffic
-            })
-            pveVmid = String(pveResult.vmid)
-          } catch (pveError) {
-            console.error('PVE VM creation failed:', pveError.message)
-          }
-          
-          await Service.create({
-            user_id: req.userId,
-            node_id: order.node_id,
-            product_id: order.product_id,
-            plan_id: order.plan_id,
-            order_id: order.id,
-            name: `${product.name}-${i + 1}`,
-            type: product.type || 'kvm',
-            status: 'running',
-            cpu: plan.cpu,
-            memory: plan.memory,
-            disk: plan.disk,
-            bandwidth: plan.bandwidth,
-            vmid: pveVmid,
-            price: parseFloat(order.amount) / (order.quantity || 1),
-            expire_time: expireAt
-          })
+        const provisioning = require('../services/provisioning')
+        const result = await provisioning.provisionOrderServices(order)
+        if (result.errors && result.errors.length) {
+          console.warn(`[Orders] Order ${order.order_no} 开通部分失败:`, result.errors)
         }
       }
       
@@ -267,31 +228,38 @@ router.post('/use-voucher', auth, async (req, res) => {
     
     const { Voucher, User, BalanceLog } = require('../models')
     const voucher = await Voucher.findOne({ 
-      where: { code: voucher_code, is_used: false } 
+      where: { code: voucher_code, used: false } 
     })
     
     if (!voucher) {
       return res.json({ code: 404, message: '兑换码无效或已使用' })
     }
     
-    if (voucher.expired_at && new Date(voucher.expired_at) < new Date()) {
+    if (voucher.expire_time && new Date(voucher.expire_time) < new Date()) {
       return res.json({ code: 400, message: '兑换码已过期' })
     }
     
-    voucher.is_used = true
-    voucher.used_by = req.userId
-    voucher.used_at = new Date()
-    await voucher.save()
-    
     const user = await User.findByPk(req.userId)
-    const newBalance = (parseFloat(user.balance) || 0) + parseFloat(voucher.amount)
+    const amount = parseFloat(voucher.value) || 0
+    const oldBalance = parseFloat(user.balance) || 0
+    const newBalance = oldBalance + amount
+
+    // 原子占用兑换码，避免并发重复使用
+    const [affected] = await Voucher.update(
+      { used: true, used_by: req.userId, used_at: new Date() },
+      { where: { id: voucher.id, used: false } }
+    )
+    if (!affected) {
+      return res.json({ code: 400, message: '兑换码已被使用' })
+    }
+    
     await user.update({ balance: newBalance })
     
     await BalanceLog.create({
       user_id: req.userId,
-      type: 'topup',
-      amount: voucher.amount,
-      balance_before: user.balance,
+      type: 'recharge',
+      amount,
+      balance_before: oldBalance,
       balance_after: newBalance,
       note: '兑换码充值: ' + voucher_code,
       related_id: voucher.id,

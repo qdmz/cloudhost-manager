@@ -195,15 +195,12 @@ router.get('/orders', auth, admin, async (req, res) => {
   }
 })
 
+// 手动处理订单（补开）：先按已支付处理，再走统一自动开通逻辑（PVE/Incus/智简魔方 均支持）
 router.post('/orders/:id/process', auth, admin, async (req, res) => {
   try {
-    const { vmService } = require('../services/vm')
-const { createAutoPortForwards } = require('../services/portForward')
+    const provisioning = require('../services/provisioning')
     
-    const order = await Order.findByPk(req.params.id, {
-      include: [{ model: Plan, as: 'plan' }]
-    })
-    
+    const order = await Order.findByPk(req.params.id)
     if (!order) return res.json({ code: 404, message: '订单不存在' })
     
     // 验证节点是否存在
@@ -212,69 +209,24 @@ const { createAutoPortForwards } = require('../services/portForward')
       return res.json({ code: 404, message: '订单中指定的节点不存在' })
     }
     
-    // 获取套餐配置
-    const plan = order.plan
-    const cpu = plan ? plan.cpu : 1
-    const memory = plan ? plan.memory : 1024
-    const disk = plan ? plan.disk : 20
-    const osType = plan ? 'lxc' : 'kvm'
-    
-    // 在PVE上创建虚拟机
-    let pveResult
-    try {
-      pveResult = await vmService.createVM(order.node_id, {
-        name: `VPS-${Date.now()}`,
-        type: osType,
-        cpu: cpu,
-        memory: memory,
-        disk: disk
+    // 若订单尚未支付，则标记为已支付后开通
+    if (order.status === 'pending') {
+      await order.update({
+        status: 'paid',
+        paid_at: new Date(),
+        payment_method: order.payment_method || 'balance'
       })
-    } catch (pveError) {
-      console.error('PVE创建失败:', pveError)
-      return res.json({ code: 500, message: `PVE节点创建失败: ${pveError.message}` })
     }
     
-    // 更新订单状态
-    await order.update({ status: 'completed', paid_at: new Date() })
-    
-    let days = 30
-    if (order.cycle === 'quarterly') days = 90
-    if (order.cycle === 'yearly') days = 365
-    
-    const expireTime = dayjs().add(days, 'day').toDate()
-    
-    // 创建服务记录
-    const service = await Service.create({
-      user_id: order.user_id,
-      node_id: order.node_id,
-      product_id: order.product_id,
-      plan_id: order.plan_id,
-      name: `VPS-${pveResult.vmid}`,
-      type: osType,
-      status: 'running',
-      cpu: cpu,
-      memory: memory,
-      disk: disk,
-      vmid: String(pveResult.vmid),
-      price: order.amount / order.quantity,
-      expire_time: expireTime
-    })
-    
-    // Auto-assign port forwards
-    try {
-      const pfResult = await createAutoPortForwards(service, order.node_id)
-      console.log('Auto-assigned ports for service', service.id, JSON.stringify(pfResult))
-    } catch (pfError) {
-      console.error('Port forward assignment failed:', pfError.message)
-    }
-    
-    res.json({ 
-      code: 200, 
-      message: `订单处理成功 (VMID: ${pveResult.vmid})`,
+    const result = await provisioning.provisionOrderServices(order)
+    const errorsText = result.errors.length ? `（失败 ${result.errors.length} 条: ${result.errors[0]}）` : ''
+    res.json({
+      code: 200,
+      message: `订单处理成功，共开通 ${result.services.length} 台${errorsText}`,
       data: {
-        vmid: pveResult.vmid,
-        type: pveResult.type,
-        node: node.name
+        count: result.services.length,
+        errors: result.errors,
+        first: result.services[0] ? { vmid: result.services[0].vmid, node: node.name } : null
       }
     })
   } catch (error) {
@@ -396,11 +348,17 @@ router.get('/nodes', auth, admin, async (req, res) => {
 
 router.post('/nodes', auth, admin, async (req, res) => {
   try {
-    const node = await Node.create(req.body)
+    const data = { ...req.body }
+    // 智简魔方等上游节点的 provider_config 仅接受合法 JSON 字符串
+    if (data.provider_config && typeof data.provider_config === 'string') {
+      try { data.provider_config = JSON.stringify(JSON.parse(data.provider_config)) }
+      catch (e) { data.provider_config = null }
+    }
+    const node = await Node.create(data)
     res.json({ code: 200, message: '添加成功', data: node })
   } catch (error) {
     console.error(error)
-    res.json({ code: 500, message: '添加失败' })
+    res.json({ code: 500, message: '添加失败: ' + error.message })
   }
 })
 
@@ -421,6 +379,12 @@ router.put('/nodes/:id', auth, admin, async (req, res) => {
     // 不允许直接修改ssh_key为空
     if (updateData.ssh_key === '' || updateData.ssh_key === undefined) {
       delete updateData.ssh_key
+    }
+    
+    // 智简魔方等上游节点的 provider_config 仅接受合法 JSON 字符串
+    if (updateData.provider_config && typeof updateData.provider_config === 'string') {
+      try { updateData.provider_config = JSON.stringify(JSON.parse(updateData.provider_config)) }
+      catch (e) { updateData.provider_config = null }
     }
     
     await Node.update(updateData, { where: { id: req.params.id } })
@@ -480,10 +444,21 @@ const { createAutoPortForwards } = require('../services/portForward')
 })
 
 
+// 节点连通性测试（PVE/Incus 直接调用节点 API；智简魔方调用上游开放 API）
 router.post("/nodes/:id/test-pve", auth, admin, async (req, res) => {
   try {
     const node = await Node.findByPk(req.params.id);
     if (!node) return res.json({ code: 404, message: "节点不存在" });
+    
+    if (node.type === 'zjmf') {
+      const zjmf = require('../services/zjmf');
+      try {
+        const result = await zjmf.getClient(node).testConnection();
+        return res.json({ success: true, message: "智简魔方 API 连接成功", data: result.data });
+      } catch (err) {
+        return res.json({ success: false, message: "智简魔方 API 连接失败: " + err.message });
+      }
+    }
     
     const { vmService, PVEClient } = require("../services/vm");
     const client = new PVEClient(node);
@@ -499,15 +474,79 @@ router.post("/nodes/:id/test-pve", auth, admin, async (req, res) => {
     res.json({ code: 500, message: "测试 PVE 连接失败" });
   }
 });
+
+// 智简魔方：拉取上游可售产品列表（用于本地产品映射）
+router.post('/nodes/:id/zjmf-products', auth, admin, async (req, res) => {
+  try {
+    const node = await Node.findByPk(req.params.id)
+    if (!node) return res.json({ code: 404, message: '节点不存在' })
+    if (node.type !== 'zjmf') return res.json({ code: 400, message: '该节点不是智简魔方节点' })
+    const zjmf = require('../services/zjmf')
+    const list = await zjmf.getClient(node).listProducts()
+    res.json({ code: 200, message: `获取到 ${list.length} 个上游产品`, data: list })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: error.message || '获取失败' })
+  }
+})
+
+// 智简魔方：获取上游商品配置（可开通镜像/周期），可一键导入本地镜像
+router.post('/nodes/:id/zjmf-product-config', auth, admin, async (req, res) => {
+  try {
+    const node = await Node.findByPk(req.params.id)
+    if (!node) return res.json({ code: 404, message: '节点不存在' })
+    if (node.type !== 'zjmf') return res.json({ code: 400, message: '该节点不是智简魔方节点' })
+
+    const { upstream_product_id: upId, import_images } = req.body
+    if (!upId) return res.json({ code: 400, message: '请填写上游产品ID' })
+
+    const zjmf = require('../services/zjmf')
+    const { vmService } = require('../services/vm')
+    const cfg = await zjmf.getClient(node).getProductConfig(upId)
+
+    let imported = []
+    if (import_images) {
+      const Product = require('../models').Product
+      const product = await Product.findOne({ where: { node_id: node.id, upstream_product_id: String(upId) } })
+      if (product) {
+        // 已映射产品：调用镜像同步（会同时更新 upstream_data 缓存）
+        imported = await vmService.syncZJMFImages(node)
+      } else {
+        // 未映射产品：直接把上游商品中的可开通系统写为本地镜像（key=上游模板ID）
+        const { Image } = require('../models')
+        let imgList = Array.isArray(cfg) ? cfg : (cfg.os_list || cfg.os || cfg.images || cfg.templates)
+        if (!Array.isArray(imgList) && typeof imgList === 'object') {
+          // 兼容 { list: [...] } 或 { os: [...] }
+          imgList = imgList.list || imgList.data || imgList.items || []
+        }
+        if (Array.isArray(imgList)) {
+          for (const img of imgList) {
+            const template = String(img.id ?? img.template ?? img.value ?? '')
+            const label = img.name || img.label || img.os_name || ''
+            if (!template) continue
+            const exist = await Image.findOne({ where: { node_id: node.id, template } })
+            if (exist) await exist.update({ name: label || exist.name, status: 'active' })
+            else await Image.create({ node_id: node.id, name: label || template, os: label || template, version: '', arch: 'amd64', type: 'vm', template, status: 'active' })
+            imported.push({ template, name: label })
+          }
+        }
+      }
+    }
+    res.json({ code: 200, data: { config: cfg, imported } })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: error.message || '获取失败' })
+  }
+})
+
 router.post('/nodes/:id/sync-images', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
-const { createAutoPortForwards } = require('../services/portForward')
     const node = await Node.findByPk(req.params.id)
     if (!node) return res.json({ code: 404, message: '节点不存在' })
     
     const images = await vmService.syncImagesFromNode(node)
-    res.json({ code: 200, message: `成功同步 ${images.length} 个镜像`, data: images })
+    res.json({ code: 200, message: `成功同步 ${images.length} 个镜像/系统`, data: images })
   } catch (error) {
     console.error(error)
     res.json({ code: 500, message: error.message || '同步失败' })
@@ -850,6 +889,21 @@ const { createAutoPortForwards } = require('../services/portForward')
   }
 })
 
+// 重试开通：针对开通失败/开通中的服务重新执行自动开通（智简魔方节点建议先同步远端主机）
+router.post('/services/:id/retry-provision', auth, admin, async (req, res) => {
+  try {
+    const service = await Service.findByPk(req.params.id)
+    if (!service) return res.json({ code: 404, message: '服务不存在' })
+
+    const provisioning = require('../services/provisioning')
+    const svc = await provisioning.retryProvisionService(service)
+    res.json({ code: 200, message: '重试开通成功', data: { vmid: svc.vmid, status: svc.status } })
+  } catch (error) {
+    console.error(error)
+    res.json({ code: 500, message: error.message || '重试开通失败' })
+  }
+})
+
 router.delete('/services/:id', auth, admin, async (req, res) => {
   try {
     const { vmService } = require('../services/vm')
@@ -904,6 +958,11 @@ const { createAutoPortForwards } = require('../services/portForward')
       return res.json({ code: 404, message: '用户不存在' })
     }
     
+    // 智简魔方节点不支持“自定义开虚拟机”，请走“产品 + 订单支付”或“节点同步主机”
+    if (node.type === 'zjmf') {
+      return res.json({ code: 400, message: '智简魔方节点不支持自定义开虚拟机，请先创建绑定该节点的“产品/套餐”，让用户下单后自动开通' })
+    }
+    
     // 在PVE上创建虚拟机
     const createOptions = {
       name: name,
@@ -931,76 +990,15 @@ const { createAutoPortForwards } = require('../services/portForward')
     let assignedIpv6 = ipv6 || '';
     
     if (!assignedIpv4 && node.nat_subnet) {
-      try {
-        const mysql = require('mysql2/promise');
-        const conn = await mysql.createConnection({ 
-          host: 'localhost', 
-          user: 'root',
-          password: 'cloudhost123',
-          database: 'cloudhost'
-        });
-        const [rows] = await conn.execute(
-          "SELECT ipv4 FROM services WHERE node_id = ? AND ipv4 != '' AND ipv4 IS NOT NULL ORDER BY CAST(SUBSTRING_INDEX(ipv4, '.', -1) AS UNSIGNED) ASC",
-          [node_id]
-        );
-        conn.close();
-        
-        const usedOctets = rows.map(r => parseInt(r.ipv4.split('.').pop())).sort((a,b) => a - b);
-        const subnet = node.nat_subnet;
-        const baseIp = subnet.split('/')[0];
-        const baseParts = baseIp.split('.').slice(0, 3);
-        
-        let found = false;
-        for (let i = 2; i <= 254; i++) {
-          if (!usedOctets.includes(i)) {
-            assignedIpv4 = baseParts.join('.') + '.' + i;
-            found = true;
-            break;
-          }
-        }
-        if (!found) console.error('No available IPv4 in subnet', subnet);
-      } catch (err) {
-        console.error('Auto-assign IPv4 failed:', err.message);
-      }
+      const provisioning = require('../services/provisioning')
+      assignedIpv4 = await provisioning.allocateIPv4(node.id, node.nat_subnet)
+      if (!assignedIpv4) console.error('No available IPv4 in subnet', node.nat_subnet)
     }
     
     if (!assignedIpv6 && node.ipv6_subnet) {
-      try {
-        const mysql = require('mysql2/promise');
-        const conn = await mysql.createConnection({ 
-          host: 'localhost', 
-          user: 'root',
-          password: 'cloudhost123',
-          database: 'cloudhost'
-        });
-        const [rows] = await conn.execute(
-          "SELECT ipv6 FROM services WHERE node_id = ? AND ipv6 != '' AND ipv6 IS NOT NULL ORDER BY id ASC",
-          [node_id]
-        );
-        conn.close();
-        
-        const subnet = node.ipv6_subnet;
-        const prefix = subnet.split('/')[0].split(':').slice(0, 4).join(':');
-        const usedSuffixes = rows.map(r => {
-          const parts = r.ipv6.split(':');
-          return parts.slice(4).join(':') || '::1';
-        });
-        
-        let counter = 2;
-        let found = false;
-        while (!found && counter < 256) {
-          const suffix = counter.toString(16);
-          const candidate = prefix + '::' + suffix;
-          if (!usedSuffixes.includes(suffix) && !usedSuffixes.includes(candidate)) {
-            assignedIpv6 = candidate;
-            found = true;
-          }
-          counter++;
-        }
-        if (!found) console.error('No available IPv6 in subnet', subnet);
-      } catch (err) {
-        console.error('Auto-assign IPv6 failed:', err.message);
-      }
+      const provisioning = require('../services/provisioning')
+      assignedIpv6 = await provisioning.allocateIPv6(node.id, node.ipv6_subnet)
+      if (!assignedIpv6) console.error('No available IPv6 in subnet', node.ipv6_subnet)
     }
     
     const service = await Service.create({

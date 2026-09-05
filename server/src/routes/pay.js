@@ -2,146 +2,16 @@ const express = require('express')
 const router = express.Router()
 const { Recharge, User, BalanceLog, Order, Service, Product, Plan, Node } = require('../models')
 const epayService = require('../services/epay')
+const provisioning = require('../services/provisioning')
 
-// 自动分配 IPv4（从 NAT 子网顺序分配）
-async function allocateIPv4(nodeId, natSubnet) {
-  if (!natSubnet) return ''
-  try {
-    const mysql = require('mysql2/promise')
-    const conn = await mysql.createConnection({
-      host: 'localhost', user: 'root', password: 'cloudhost123', database: 'cloudhost'
-    })
-    const [rows] = await conn.execute(
-      'SELECT ipv4 FROM services WHERE node_id = ? AND ipv4 != "" AND ipv4 IS NOT NULL ORDER BY CAST(SUBSTRING_INDEX(ipv4, ".", -1) AS UNSIGNED) ASC',
-      [nodeId]
-    )
-    conn.close()
-    
-    const usedOctets = rows.map(r => parseInt(r.ipv4.split('.').pop())).sort((a, b) => a - b)
-    const baseIp = natSubnet.split('/')[0]
-    const baseParts = baseIp.split('.').slice(0, 3)
-    
-    for (let i = 2; i <= 254; i++) {
-      if (!usedOctets.includes(i)) {
-        return baseParts.join('.') + '.' + i
-      }
-    }
-  } catch (err) {
-    console.error('[allocateIPv4] Failed:', err.message)
-  }
-  return ''
-}
-
-// 自动分配 IPv6（从子网顺序分配）
-async function allocateIPv6(nodeId, ipv6Subnet) {
-  if (!ipv6Subnet) return ''
-  try {
-    const mysql = require('mysql2/promise')
-    const conn = await mysql.createConnection({
-      host: 'localhost', user: 'root', password: 'cloudhost123', database: 'cloudhost'
-    })
-    const [rows] = await conn.execute(
-      'SELECT ipv6 FROM services WHERE node_id = ? AND ipv6 != "" AND ipv6 IS NOT NULL ORDER BY id ASC',
-      [nodeId]
-    )
-    conn.close()
-    
-    const prefix = ipv6Subnet.split('/')[0].split(':').slice(0, 4).join(':')
-    const usedSuffixes = rows.map(r => {
-      const parts = r.ipv6.split(':')
-      return parts.slice(4).join(':') || '::1'
-    })
-    
-    for (let counter = 2; counter < 256; counter++) {
-      const suffix = counter.toString(16)
-      const candidate = prefix + '::' + suffix
-      if (!usedSuffixes.includes(suffix) && !usedSuffixes.includes(candidate)) {
-        return candidate
-      }
-    }
-  } catch (err) {
-    console.error('[allocateIPv6] Failed:', err.message)
-  }
-  return ''
-}
-
-// 支付成功后的处理函数
+// 支付成功后的处理函数（统一走 provisioning，支持 PVE/Incus 与智简魔方节点自动开通）
 async function processPaymentSuccess(order, tradeNo, userId) {
-  const plan = await Plan.findByPk(order.plan_id)
-  const node = await Node.findByPk(order.node_id)
-  const product = await Product.findByPk(order.product_id)
-  
-  if (!plan || !node || !product) return false
-  
-  let expireDays = 30
-  if (order.cycle === 'quarterly') expireDays = 90
-  if (order.cycle === 'yearly') expireDays = 365
-  
-  const expireAt = new Date()
-  expireAt.setDate(expireAt.getDate() + expireDays)
-  
-  let successCount = 0
-  
-  for (let i = 0; i < (order.quantity || 1); i++) {
-    let pveVmid = ''
-    try {
-      const { vmService } = require('../services/vm')
-      const pveResult = await vmService.createVM(order.node_id, {
-        productId: order.product_id,
-        name: (product.name || "VM").replace(/[^\w-]/g, "") + "-" + (i + 1),
-        type: product.type || 'kvm',
-        cpu: plan.cpu,
-        memory: plan.memory,
-        disk: plan.disk,
-        bandwidth: plan.bandwidth,
-        traffic: plan.traffic
-      })
-      pveVmid = String(pveResult.vmid)
-      successCount++
-    } catch (pveError) {
-      console.error('PVE VM creation failed:', pveError.message)
-    }
-    
-    // Auto-assign IPv4 and IPv6 from node network config
-    let assignedIpv4 = ''
-    let assignedIpv6 = ''
-    if (node) {
-      assignedIpv4 = await allocateIPv4(order.node_id, node.nat_subnet)
-      assignedIpv6 = await allocateIPv6(order.node_id, node.ipv6_subnet)
-    }
-    
-    const service = await Service.create({
-      user_id: userId,
-      node_id: order.node_id,
-      product_id: order.product_id,
-      plan_id: order.plan_id,
-      order_id: order.id,
-      name: (product.name || "VM").replace(/[^\w-]/g, "") + "-" + (i + 1),
-      type: product.type || 'kvm',
-      status: 'running',
-      cpu: plan.cpu,
-      memory: plan.memory,
-      disk: plan.disk,
-      bandwidth: plan.bandwidth,
-      vmid: pveVmid,
-      ipv4: assignedIpv4,
-      ipv6: assignedIpv6,
-      password: '',
-      price: parseFloat(order.amount) / (order.quantity || 1),
-      expire_time: expireAt
-    })
-    
-    // Auto-assign port forwards
-    try {
-      const { createAutoPortForwards } = require('../services/portForward')
-      await createAutoPortForwards(service, order.node_id)
-    } catch (pfError) {
-      console.error('[PayCallback] Port forward assignment failed:', pfError.message)
-    }
+  const result = await provisioning.provisionOrderServices(order)
+  if (result.errors && result.errors.length) {
+    console.warn(`[PayCallback] Order ${order.order_no} 开通部分失败:`, result.errors)
   }
-  
-  await order.update({ status: 'paid', paid_at: new Date(), trade_no: tradeNo })
-  console.log(`Order ${order.order_no} completed: ${successCount} services created`)
+  await order.update({ status: 'paid', paid_at: new Date(), trade_no: tradeNo || null })
+  console.log(`[PayCallback] Order ${order.order_no} completed: ${result.services.length} services`)
   return true
 }
 

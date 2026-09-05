@@ -24,8 +24,10 @@ const Service = sequelize.define('Service', {
   node_id: { type: DataTypes.INTEGER, allowNull: false },
   product_id: { type: DataTypes.INTEGER },
   plan_id: { type: DataTypes.INTEGER },
+  order_id: { type: DataTypes.INTEGER },
+  image_id: { type: DataTypes.INTEGER },
   name: { type: DataTypes.STRING(100), allowNull: false },
-  type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus'), allowNull: false },
+  type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus', 'zjmf'), allowNull: false },
   status: { type: DataTypes.ENUM('pending', 'running', 'stopped', 'suspended'), defaultValue: 'pending' },
   cpu: { type: DataTypes.INTEGER, defaultValue: 1 },
   memory: { type: DataTypes.INTEGER, defaultValue: 1024 },
@@ -51,9 +53,12 @@ const Service = sequelize.define('Service', {
 const Product = sequelize.define('Product', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   name: { type: DataTypes.STRING(100), allowNull: false },
-  type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus'), allowNull: false },
+  type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus', 'zjmf'), allowNull: false },
   description: { type: DataTypes.TEXT },
   features: { type: DataTypes.TEXT },
+  // 上游（智简魔方）对接字段：仅 node.type === 'zjmf' 时使用
+  upstream_product_id: { type: DataTypes.STRING(64) },
+  upstream_data: { type: DataTypes.TEXT },
   cpu_range: { type: DataTypes.STRING(20) },
   memory_range: { type: DataTypes.STRING(20) },
   disk_range: { type: DataTypes.STRING(20) },
@@ -62,7 +67,7 @@ const Product = sequelize.define('Product', {
   status: { type: DataTypes.ENUM('online', 'offline'), defaultValue: 'online' },
   sort: { type: DataTypes.INTEGER, defaultValue: 0 },
   node_id: { type: DataTypes.INTEGER, allowNull: true },
-  default_type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus'), defaultValue: 'kvm' },
+  default_type: { type: DataTypes.ENUM('kvm', 'lxc', 'lxd', 'incus', 'zjmf'), defaultValue: 'kvm' },
   default_os: { type: DataTypes.STRING(50), defaultValue: '' },
   image_id: { type: DataTypes.INTEGER, allowNull: true },
   custom_ports: { type: DataTypes.TEXT },
@@ -96,16 +101,19 @@ const Order = sequelize.define('Order', {
   amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   status: { type: DataTypes.ENUM('pending', 'paid', 'completed', 'cancelled', 'refunded'), defaultValue: 'pending' },
   payment_method: { type: DataTypes.STRING(20) },
-  paid_at: { type: DataTypes.DATE }
+  paid_at: { type: DataTypes.DATE },
+  trade_no: { type: DataTypes.STRING(64) }
 }, { tableName: 'orders', timestamps: true, underscored: true })
 
 const Node = sequelize.define('Node', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   name: { type: DataTypes.STRING(100), allowNull: false },
-  type: { type: DataTypes.ENUM('pve', 'incus', 'lxd', 'kvm'), allowNull: false },
+  type: { type: DataTypes.ENUM('pve', 'incus', 'lxd', 'kvm', 'zjmf'), allowNull: false },
   host: { type: DataTypes.STRING(255), allowNull: false },
   api_user: { type: DataTypes.STRING(100) },
   api_token: { type: DataTypes.STRING(255) },
+  // 智简魔方等上游节点专用：JSON 扩展配置（API 动作覆盖、地域、默认镜像等）
+  provider_config: { type: DataTypes.TEXT },
   location: { type: DataTypes.STRING(100) },
   nat_bridge: { type: DataTypes.STRING(50) },
   ipv6_bridge: { type: DataTypes.STRING(50) },

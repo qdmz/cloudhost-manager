@@ -17,6 +17,10 @@
             {{ record.status === 'online' ? '上架' : '下架' }}
           </a-tag>
         </template>
+        <template v-else-if="column.key === 'type'">
+          <a-tag v-if="record.type === 'zjmf'" color="purple">智简魔方</a-tag>
+          <span v-else>{{ (record.type || '').toUpperCase() }}</span>
+        </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
             <a-button size="small" @click="openEditModal(record)">编辑</a-button>
@@ -39,11 +43,12 @@
           </a-col>
           <a-col :span="12">
             <a-form-item label="产品类型" name="type">
-              <a-select v-model:value="productForm.type">
+              <a-select v-model:value="productForm.type" :disabled="currentNodeIsZjmf">
                 <a-select-option value="kvm">KVM</a-select-option>
                 <a-select-option value="lxc">LXC</a-select-option>
                 <a-select-option value="lxd">LXD</a-select-option>
                 <a-select-option value="incus">Incus</a-select-option>
+                <a-select-option value="zjmf">智简魔方 (上游分销)</a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
@@ -74,16 +79,18 @@
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="默认节点">
-              <a-select v-model:value="productForm.node_id" @change="loadOsOptionsFromNode" placeholder="选择默认节点">
+              <a-select v-model:value="productForm.node_id" @change="handleNodeChange" placeholder="选择默认节点">
                 <a-select-option v-for="node in availableNodes" :key="node.id" :value="node.id">
-                  {{ node.name }} ({{ node.host }})
+                  {{ node.name }} <a-tag v-if="node.type === 'zjmf'" color="purple" style="font-size: 10px">智简魔方</a-tag>
+                  <span class="text-muted">({{ node.host }})</span>
                 </a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
           <a-col :span="12">
             <a-form-item label="默认虚拟化类型">
-              <a-select v-model:value="productForm.default_type" @change="onDefaultTypeChange" placeholder="选择虚拟化类型">
+              <a-select v-model:value="productForm.default_type" @change="onDefaultTypeChange" placeholder="选择虚拟化类型"
+                :disabled="currentNodeIsZjmf">
                 <a-select-option value="kvm">KVM</a-select-option>
                 <a-select-option value="docker">Docker</a-select-option>
                 <a-select-option value="lxc">LXC</a-select-option>
@@ -91,18 +98,38 @@
             </a-form-item>
           </a-col>
         </a-row>
-        <a-form-item label="默认操作系统">
-          <a-select v-model:value="productForm.default_os" placeholder="选择默认操作系统">
-            <a-select-option v-for="os in osOptions" :key="os.value" :value="os.value">{{ os.label }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="默认镜像模板">
-          <a-select v-model:value="productForm.image_id" placeholder="选择默认镜像（优先级高于操作系统）" allowClear>
-            <a-select-option v-for="img in filteredImages" :key="img.id" :value="img.id">
-              {{ img.name }} ({{ img.os }} - {{ img.type }})
-            </a-select-option>
-          </a-select>
-        </a-form-item>
+
+        <template v-if="currentNodeIsZjmf">
+          <a-divider style="margin: 4px 0 16px">智简魔方 上游分销配置</a-divider>
+          <a-form-item label="上游产品ID" required>
+            <a-input v-model:value="productForm.upstream_product_id" placeholder="填写上游产品 ID（见节点管理-上游产品）" style="max-width: 320px" />
+            <a-button style="margin-left: 12px" :loading="upstreamLoading" @click="loadUpstreamProducts">从上游拉取</a-button>
+          </a-form-item>
+          <a-form-item v-if="upstreamProducts.length" label="选择要分销的上游产品">
+            <a-select v-model:value="productForm.upstream_product_id" placeholder="点击选择" style="max-width: 480px">
+              <a-select-option v-for="p in upstreamProducts" :key="p.id" :value="String(p.id)">
+                ID {{ p.id }} - {{ p.name }} <span class="text-muted">({{ p.group_name || '默认分组' }})</span>
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-alert type="warning" show-icon style="margin-bottom: 12px"
+            message="套餐里的 CPU/内存/磁盘/周期与价格会透传给上游下单；请确认套餐配置在上游允许范围内，否则开通将失败。" />
+        </template>
+
+        <template v-if="!currentNodeIsZjmf">
+          <a-form-item label="默认操作系统">
+            <a-select v-model:value="productForm.default_os" placeholder="选择默认操作系统">
+              <a-select-option v-for="os in osOptions" :key="os.value" :value="os.value">{{ os.label }}</a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="默认镜像模板">
+            <a-select v-model:value="productForm.image_id" placeholder="选择默认镜像（优先级高于操作系统）" allowClear>
+              <a-select-option v-for="img in filteredImages" :key="img.id" :value="img.id">
+                {{ img.name }} ({{ img.os }} - {{ img.type }})
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+        </template>
       </a-form>
     </a-modal>
     
@@ -187,7 +214,7 @@
 import { ref, onMounted, reactive, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
-import { getProducts, createProduct, updateProduct, deleteProduct, getPlans, createPlan, updatePlan, deletePlan } from '@/api/admin'
+import { getProducts, createProduct, updateProduct, deleteProduct, getPlans, createPlan, updatePlan, deletePlan, getZJMFProducts } from '@/api/admin'
 import { getNodes } from '@/api/product'
 
 const loading = ref(false)
@@ -212,7 +239,8 @@ const productForm = reactive({
   node_id: null,
   default_type: 'kvm',
   default_os: 'ubuntu-22.04',
-  image_id: null
+  image_id: null,
+  upstream_product_id: ''
 })
 
 const availableNodes = ref([])
@@ -220,9 +248,51 @@ const osOptions = ref([])
 const allImages = ref([])
 
 const filteredImages = computed(() => {
-  if (!productForm.value.node_id) return allImages.value
-  return allImages.value.filter(img => img.node_id === productForm.value.node_id)
+  if (!productForm.node_id) return allImages.value
+  return allImages.value.filter(img => img.node_id === productForm.node_id)
 })
+
+// 当前选择的是否为智简魔方节点
+const currentNodeIsZjmf = computed(() => {
+  const n = availableNodes.value.find(x => x.id === productForm.node_id)
+  return !!(n && n.type === 'zjmf')
+})
+
+const upstreamProducts = ref([])
+const upstreamLoading = ref(false)
+
+const handleNodeChange = async (nodeId) => {
+  const n = availableNodes.value.find(x => x.id === nodeId)
+  if (n && n.type === 'zjmf') {
+    productForm.type = 'zjmf'
+    productForm.default_type = 'kvm'
+    osOptions.value = []
+    allImages.value = []
+    return
+  }
+  if (productForm.type === 'zjmf') {
+    productForm.type = 'kvm'
+  }
+  if (nodeId) await loadOsOptionsFromNode(nodeId)
+}
+
+const loadUpstreamProducts = async () => {
+  const node = availableNodes.value.find(x => x.id === productForm.node_id)
+  if (!node) {
+    message.warning('请先选择智简魔方节点')
+    return
+  }
+  upstreamLoading.value = true
+  try {
+    const res = await getZJMFProducts(node.id)
+    upstreamProducts.value = res.data || []
+    if (!upstreamProducts.value.length) message.info('上游暂无可售产品（若子店需先经上游授权开通售卖）')
+  } catch (error) {
+    message.error('拉取上游产品失败: ' + (error.message || error))
+  } finally {
+    upstreamLoading.value = false
+  }
+}
 
 const loadOsOptionsFromNode = async (nodeId) => {
   if (!nodeId) {
@@ -282,7 +352,7 @@ const planForm = reactive({
 const columns = [
   { title: 'ID', dataIndex: 'id', width: 60 },
   { title: '产品名称', dataIndex: 'name' },
-  { title: '类型', dataIndex: 'type' },
+  { title: '类型', key: 'type' },
   { title: '价格范围', key: 'price' },
   { title: '状态', key: 'status' },
   { title: '操作', key: 'action', width: 250 }
@@ -321,8 +391,10 @@ const openAddModal = () => {
     memory_range: '512-16384',
     disk_range: '10-500',
     status: 'online',
-    image_id: null
+    image_id: null,
+    upstream_product_id: ''
   })
+  upstreamProducts.value = []
   addModalVisible.value = true
 }
 
@@ -340,12 +412,14 @@ const openEditModal = (product) => {
     node_id: product.node_id || null,
     default_type: product.default_type || 'kvm',
     default_os: product.default_os || 'ubuntu-22.04',
-    image_id: product.image_id || null
+    image_id: product.image_id || null,
+    upstream_product_id: product.upstream_product_id != null ? String(product.upstream_product_id) : ''
   })
+  upstreamProducts.value = []
   addModalVisible.value = true
   // 先加载节点列表，再加载镜像
   fetchAvailableNodes().then(() => {
-    if (productForm.node_id) {
+    if (!currentNodeIsZjmf.value && productForm.node_id) {
       loadOsOptionsFromNode(productForm.node_id)
     }
   })
@@ -441,3 +515,25 @@ onMounted(() => {
   fetchAvailableNodes()
 })
 </script>
+
+<style lang="scss" scoped>
+.products-page {
+  padding: 20px;
+
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+}
+
+.text-muted {
+  color: #999;
+  font-size: 12px;
+}
+
+.text-primary {
+  color: #1677ff;
+}
+</style>

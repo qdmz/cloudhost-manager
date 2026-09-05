@@ -21,8 +21,15 @@
           <a-progress :percent="record.cpu_usage" size="small" />
           <div class="text-muted">内存: {{ record.memory_usage || 0 }}/{{ record.memory_total || 0 }}GB</div>
         </template>
+        <template v-else-if="column.key === 'type'">
+          <a-tag v-if="record.type === 'zjmf'" color="purple">智简魔方</a-tag>
+          <a-tag v-else color="blue">{{ (record.type || '').toUpperCase() }}</a-tag>
+        </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
+            <a-button v-if="record.type === 'zjmf'" size="small" type="primary" ghost @click="handleZJMFProducts(record)">
+              <ApartmentOutlined /> 上游产品
+            </a-button>
             <a-button size="small" @click="handleEditNode(record)">编辑</a-button>
             <a-button size="small" @click="handleSyncNode(record)"><SyncOutlined /> 同步</a-button>
             <a-button size="small" @click="handleTestPve(record)"><CheckOutlined /> 测试</a-button>
@@ -53,25 +60,33 @@
                     <a-select-option value="incus">Incus</a-select-option>
                     <a-select-option value="lxd">LXD</a-select-option>
                     <a-select-option value="kvm">KVM</a-select-option>
+                    <a-select-option value="zjmf">智简魔方 (上游分销)</a-select-option>
                   </a-select>
                 </a-form-item>
               </a-col>
             </a-row>
-            <a-form-item label="节点地址 (PVE Web UI)" name="host" :rules="[{ required: true, message: '请输入节点地址' }]">
-              <a-input v-model:value="nodeForm.host" placeholder="如: https://pve.example.com:8006" />
+            <a-form-item label="节点地址 / 上游站点" name="host" :rules="[{ required: true, message: '请输入节点地址' }]">
+              <a-input v-model:value="nodeForm.host" :placeholder="nodeForm.type === 'zjmf' ? '如: https://api.zjmf.com' : '如: https://pve.example.com:8006'" />
             </a-form-item>
             <a-row :gutter="16">
               <a-col :span="12">
                 <a-form-item label="API用户名" name="api_user">
-                  <a-input v-model:value="nodeForm.api_user" placeholder="如: root@pam" />
+                  <a-input v-model:value="nodeForm.api_user" :placeholder="nodeForm.type === 'zjmf' ? '智简魔方 API 登录账号(商户邮箱)' : '如: root@pam'" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
-                <a-form-item label="API令牌" name="api_token">
-                  <a-input-password v-model:value="nodeForm.api_token" placeholder="PVE API Token" />
+                <a-form-item label="API令牌/密钥" name="api_token">
+                  <a-input-password v-model:value="nodeForm.api_token" :placeholder="nodeForm.type === 'zjmf' ? '智简魔方 API 访问密钥' : 'PVE API Token'" />
                 </a-form-item>
               </a-col>
             </a-row>
+            <template v-if="nodeForm.type === 'zjmf'">
+              <a-form-item label="上游接口参数 (可选高级配置，JSON)" name="provider_config">
+                <a-textarea v-model:value="nodeForm.provider_config" :rows="3"
+                  placeholder='{"api_path":"/api/v1/portal/login","sign_type":"MD5"} 留空则使用智简魔方默认接口路径' />
+                <div class="form-help">保存前会自动校验 JSON，非法内容将被忽略</div>
+              </a-form-item>
+            </template>
             <a-form-item label="节点位置" name="location">
               <a-input v-model:value="nodeForm.location" placeholder="如: 洛杉矶" />
             </a-form-item>
@@ -235,12 +250,20 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal v-model:open="showZJMFProductsModal" :title="'智简魔方 上游产品 - ' + (zjmfNode?.name || '')" width="900px" :footer="null">
+      <a-alert type="info" show-icon style="margin-bottom: 16px">
+        <template #message>把上游产品记下 <b>ID</b>，再到「产品管理」创建绑定该节点的产品并填写"上游产品ID"，用户下单支付后即可自动开通。</template>
+      </a-alert>
+      <a-table :columns="zjmfProductColumns" :data-source="zjmfProducts" :loading="zjmfLoading" size="small" row-key="id"
+        :pagination="false" :scroll="{ x: 800 }" />
+    </a-modal>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
- import { getNodes as apiGetNodes, createNode, updateNode, deleteNode, syncNode, syncNodeImages, testSshConnection as apiTestSsh, testPVEConnection as apiTestPVE, getDomainBindings, updateDomainBinding, deleteDomainBinding, getPortForwards, updatePortForward, deletePortForward, importVM, getImages, createImage, updateImage, deleteImage } from "@/api/admin";
+ import { getNodes as apiGetNodes, createNode, updateNode, deleteNode, syncNode, syncNodeImages, testSshConnection as apiTestSsh, testPVEConnection as apiTestPVE, getDomainBindings, updateDomainBinding, deleteDomainBinding, getPortForwards, updatePortForward, deletePortForward, importVM, getImages, createImage, updateImage, deleteImage, getZJMFProducts } from "@/api/admin";
 import { message } from 'ant-design-vue'
 
 const loading = ref(false)
@@ -253,6 +276,17 @@ const images = ref([])
 const activeTab = ref('basic')
 const sshTesting = ref(false)
 const sshTestResult = ref(null)
+const showZJMFProductsModal = ref(false)
+const zjmfProducts = ref([])
+const zjmfLoading = ref(false)
+const zjmfNode = ref(null)
+
+const zjmfProductColumns = [
+  { title: '上游ID', dataIndex: 'id', width: 90 },
+  { title: '产品名称', dataIndex: 'name' },
+  { title: '产品组', dataIndex: 'group_name' },
+  { title: '描述', dataIndex: 'description' }
+]
 
 const nodeForm = ref({
   id: null, name: '', type: 'pve', host: '', api_user: '', api_token: '',
@@ -267,7 +301,7 @@ const imageForm = ref({ id: null, node_id: null, name: '', os: '', version: '', 
 const columns = [
   { title: 'ID', dataIndex: 'id', width: 60 },
   { title: '节点名称', dataIndex: 'name' },
-  { title: '类型', dataIndex: 'type' },
+  { title: '类型', key: 'type' },
   { title: '位置', dataIndex: 'location' },
   { title: '状态', key: 'status' },
   { title: 'SSH', key: 'ssh_status', width: 100 },
@@ -301,7 +335,8 @@ const openAddModal = () => {
     location: '', nat_bridge: 'vmbr1', ipv6_bridge: 'vmbr2',
     nat_subnet: '', ipv6_subnet: '', note: '',
     port_range_start: 30000, port_range_end: 31000, max_ports_per_vm: 5,
-    ssh_enabled: false, ssh_host: '', ssh_port: 22, ssh_username: 'root', ssh_password: '', ssh_key: ''
+    ssh_enabled: false, ssh_host: '', ssh_port: 22, ssh_username: 'root', ssh_password: '', ssh_key: '',
+    provider_config: ''
   }
   activeTab.value = 'basic'
   sshTestResult.value = null
@@ -361,7 +396,8 @@ const handleEditNode = (node) => {
     ssh_port: node.ssh_port || 22,
     ssh_username: node.ssh_username || 'root',
     ssh_password: '',
-    ssh_key: node.ssh_key || ''
+    ssh_key: node.ssh_key || '',
+    provider_config: node.provider_config || ''
   }
   activeTab.value = 'basic'
   sshTestResult.value = null
@@ -406,15 +442,34 @@ const handleSyncNode = async (node) => {
 }
 
 const handleTestPve = async (node) => {
+  const isZjmf = node.type === 'zjmf'
   try {
     const res = await apiTestPVE(node.id)
     if (res.data?.success) {
-      message.success("PVE API 连接成功")
+      message.success(isZjmf ? "智简魔方 API 连接成功" : "PVE API 连接成功")
     } else {
-      message.error(res.data?.message || "PVE API 连接失败")
+      message.error(res.data?.message || (isZjmf ? "智简魔方 API 连接失败" : "PVE API 连接失败"))
     }
   } catch (error) {
-    message.error(error.message || "PVE API 连接失败")
+    message.error(error.message || (isZjmf ? "智简魔方 API 连接失败" : "PVE API 连接失败"))
+  }
+}
+
+const handleZJMFProducts = async (node) => {
+  zjmfNode.value = node
+  showZJMFProductsModal.value = true
+  zjmfLoading.value = true
+  zjmfProducts.value = []
+  try {
+    const res = await getZJMFProducts(node.id)
+    zjmfProducts.value = res.data || []
+    if (!zjmfProducts.value.length) {
+      message.info('上游暂无可售产品（若子店需先经上游授权开通售卖）')
+    }
+  } catch (error) {
+    message.error('获取上游产品失败: ' + (error.message || error))
+  } finally {
+    zjmfLoading.value = false
   }
 }
 

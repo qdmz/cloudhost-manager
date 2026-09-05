@@ -48,6 +48,15 @@ export const deleteImage = (id) => request.delete(`/admin/images/${id}`)
 export const getImage = (id) => request.get(`/admin/images/${id}`)
 
 export const convertServiceToTemplate = (id) => request.post(`/admin/services/${id}/convert-to-template`)
+// 管理端服务操作（开机/关机/重启/重试开通）
+export const adminStartService = (id) => request.post(`/admin/services/${id}/start`)
+export const adminStopService = (id) => request.post(`/admin/services/${id}/stop`)
+export const adminRestartService = (id) => request.post(`/admin/services/${id}/restart`)
+export const retryProvisionService = (id) => request.post(`/admin/services/${id}/retry-provision`)
+
+// 智简魔方上游信息
+export const getZJMFProducts = (nodeId) => request.post(`/admin/nodes/${nodeId}/zjmf-products`)
+export const getZJMFProductConfig = (nodeId, data) => request.post(`/admin/nodes/${nodeId}/zjmf-product-config`, data)
 
 export const getConfigs = () => request.get('/admin/configs')
 export const updateConfigs = (data) => request.put('/admin/configs', data)
